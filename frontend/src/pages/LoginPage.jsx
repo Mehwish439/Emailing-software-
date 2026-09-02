@@ -34,8 +34,8 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-md">
         <div className="flex justify-center mb-6">
-          <div className="h-10 w-10 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold text-lg">
-            C
+          <div className="h-10 px-3 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold text-lg">
+            QRM
           </div>
         </div>
         <div className="card p-8">

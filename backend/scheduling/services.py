@@ -167,10 +167,30 @@ def process_due_schedules():
         {"schedule_id": ..., "campaign_id": ..., "result": "sent"}
         {"schedule_id": ..., "campaign_id": ..., "result": "failed", "detail": "..."}
     """
+    logger.info("process_due_schedules: run started at %s", dj_timezone.now().isoformat())
     results = []
     while True:
         schedule = _claim_next_due_schedule()
         if schedule is None:
             break
-        results.append(_process_one_schedule(schedule))
+        logger.info(
+            "process_due_schedules: claimed schedule_id=%s campaign_id=%s scheduled_at=%s",
+            schedule.id, schedule.campaign_id, schedule.scheduled_at.isoformat(),
+        )
+        result = _process_one_schedule(schedule)
+        logger.info("process_due_schedules: result=%s", result)
+        results.append(result)
+
+    if not results:
+        logger.info(
+            "process_due_schedules: no due schedules found (checked scheduled_at <= %s). "
+            "If you expected a due campaign here, either nothing is actually calling this function "
+            "(see POST /api/scheduling/process-due/ or `manage.py process_scheduled_campaigns` — "
+            "one of these needs an external trigger, e.g. Supabase pg_cron or cron-job.org) or the "
+            "ScheduledCampaign's status/scheduled_at doesn't match what you expect — check "
+            "the ScheduledCampaign row directly.",
+            dj_timezone.now().isoformat(),
+        )
+    else:
+        logger.info("process_due_schedules: run finished, processed %s schedule(s)", len(results))
     return results

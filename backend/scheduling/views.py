@@ -1,3 +1,5 @@
+import logging
+
 from django.conf import settings
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
@@ -11,6 +13,8 @@ from common.exceptions import ValidationAppError
 from .models import ScheduledCampaign
 from .serializers import CreateScheduleSerializer, ScheduledCampaignSerializer, UpdateScheduleSerializer
 from .services import cancel_schedule, create_schedule, process_due_schedules, update_schedule
+
+logger = logging.getLogger(__name__)
 
 
 class ScheduledCampaignListView(generics.ListAPIView):
@@ -106,8 +110,15 @@ def process_due_schedules_view(request):
     the row-locking that prevents any schedule from being processed twice.
     """
     if not _cron_request_authorized(request):
+        logger.warning(
+            "process-due: REJECTED request from %s (missing/wrong secret). "
+            "If you expect an external scheduler to be calling this, this log line means it either "
+            "isn't sending the secret correctly, or CRON_SECRET doesn't match on both sides.",
+            request.META.get("REMOTE_ADDR"),
+        )
         return Response({"detail": "Unauthorized."}, status=status.HTTP_401_UNAUTHORIZED)
 
+    logger.info("process-due: authorized request received from %s", request.META.get("REMOTE_ADDR"))
     results = process_due_schedules()
     return Response({"processed": len(results), "results": results})
 

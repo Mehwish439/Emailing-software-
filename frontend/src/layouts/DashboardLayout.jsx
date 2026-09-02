@@ -85,8 +85,8 @@ export default function DashboardLayout() {
     <div className="min-h-screen flex bg-slate-50">
       <aside className="hidden md:flex w-64 flex-col bg-white border-r border-slate-200">
         <div className="flex items-center gap-2 px-6 h-16 border-b border-slate-200">
-          <div className="h-8 w-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold">C</div>
-          <span className="font-semibold text-slate-900">CampaignHQ</span>
+          <div className="h-8 w-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold">Q</div>
+          <span className="font-semibold text-slate-900">QRM</span>
         </div>
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
           {NAV_SECTIONS.map((section, idx) => (
