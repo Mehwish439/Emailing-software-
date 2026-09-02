@@ -158,6 +158,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # CORS / CSRF
 # ---------------------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:5173")
+CORS_ALLOWED_ORIGINS = [
+    "https://emailing-software-1.onrender.com",
+]
 CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:5173")
 
