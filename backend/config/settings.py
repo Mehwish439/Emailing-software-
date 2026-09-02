@@ -247,3 +247,8 @@ LOGGING = {
         "scheduling": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
     },
 }
+REST_FRAMEWORK = {
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+    ],
+}
