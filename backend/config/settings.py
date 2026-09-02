@@ -1,3 +1,4 @@
+
 """
 Django settings for the Email Campaign Management Platform.
 All sensitive/configurable values are pulled from environment variables (.env).
@@ -43,12 +44,14 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+
     # third party
     "rest_framework",
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "django_filters",
+
     # local apps
     "common",
     "accounts",
@@ -94,6 +97,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
+
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
@@ -119,17 +123,28 @@ DATABASES = {
     )
 }
 
+
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
 AUTH_USER_MODEL = "accounts.User"
 
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 8}},
-    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
-    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 8},
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"
+    },
 ]
+
 
 # ---------------------------------------------------------------------------
 # I18N / TZ
@@ -139,79 +154,153 @@ TIME_ZONE = os.getenv("TIME_ZONE", "Asia/Karachi")
 USE_I18N = True
 USE_TZ = True  # Always store timestamps in UTC internally
 
+
 # ---------------------------------------------------------------------------
 # Static files
 # ---------------------------------------------------------------------------
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
 # WhiteNoise serves collected static files (Django admin's CSS/JS) directly
 # from the Django app itself — no separate static file host/CDN needed,
 # which keeps a Render deployment to a single web service. Compressed +
 # hashed filenames enable long-lived caching safely.
 STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage"
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    },
 }
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
 
 # ---------------------------------------------------------------------------
 # CORS / CSRF
 # ---------------------------------------------------------------------------
-CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:5173")
+CORS_ALLOWED_ORIGINS = env_list(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:5173",
+)
+
 CORS_ALLOWED_ORIGINS = [
     "https://emailing-software-1.onrender.com",
 ]
+
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:5173")
+
+CSRF_TRUSTED_ORIGINS = env_list(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:5173",
+)
+
 
 # ---------------------------------------------------------------------------
 # REST Framework
 # ---------------------------------------------------------------------------
 REST_FRAMEWORK = {
+    # Authentication
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
+
+    # Permissions
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+
+    # Filtering / searching / ordering
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ),
+
+    # Pagination
     "DEFAULT_PAGINATION_CLASS": "common.pagination.StandardResultsPagination",
     "PAGE_SIZE": 20,
+
+    # Throttling
     "DEFAULT_THROTTLE_CLASSES": (
         "rest_framework.throttling.ScopedRateThrottle",
     ),
+
     "DEFAULT_THROTTLE_RATES": {
         "test-email": "10/hour",
         "webhook": "600/minute",
         "auth": "20/minute",
         "cron": "120/minute",
     },
+
+    # Exception handling
     "EXCEPTION_HANDLER": "common.exceptions.custom_exception_handler",
+
+    # Renderer
+    "DEFAULT_RENDERER_CLASSES": (
+        "rest_framework.renderers.JSONRenderer",
+    ),
 }
 
+
+# ---------------------------------------------------------------------------
+# Simple JWT
+# ---------------------------------------------------------------------------
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.getenv("ACCESS_TOKEN_LIFETIME_MINUTES", 30))),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.getenv("REFRESH_TOKEN_LIFETIME_DAYS", 7))),
+    "ACCESS_TOKEN_LIFETIME": timedelta(
+        minutes=int(
+            os.getenv(
+                "ACCESS_TOKEN_LIFETIME_MINUTES",
+                30,
+            )
+        )
+    ),
+
+    "REFRESH_TOKEN_LIFETIME": timedelta(
+        days=int(
+            os.getenv(
+                "REFRESH_TOKEN_LIFETIME_DAYS",
+                7,
+            )
+        )
+    ),
+
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
+
     "AUTH_HEADER_TYPES": ("Bearer",),
+
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
 }
+
 
 # ---------------------------------------------------------------------------
 # Brevo
 # ---------------------------------------------------------------------------
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
-BREVO_API_BASE_URL = os.getenv("BREVO_API_BASE_URL", "https://api.brevo.com/v3")
-BREVO_WEBHOOK_SECRET = os.getenv("BREVO_WEBHOOK_SECRET", "")
-BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "Email Campaign Platform")
-BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", "no-reply@example.com")
+BREVO_API_BASE_URL = os.getenv(
+    "BREVO_API_BASE_URL",
+    "https://api.brevo.com/v3",
+)
 
+BREVO_WEBHOOK_SECRET = os.getenv("BREVO_WEBHOOK_SECRET", "")
+
+BREVO_SENDER_NAME = os.getenv(
+    "BREVO_SENDER_NAME",
+    "Email Campaign Platform",
+)
+
+BREVO_SENDER_EMAIL = os.getenv(
+    "BREVO_SENDER_EMAIL",
+    "no-reply@example.com",
+)
+
+
+# ---------------------------------------------------------------------------
+# Scheduling / Cron
+# ---------------------------------------------------------------------------
 # Shared secret guarding POST /api/scheduling/process-due/ — the HTTP
 # equivalent of `python manage.py process_scheduled_campaigns`, for hosts
 # without real cron access (e.g. a free-tier PaaS), triggered by a free
@@ -219,13 +308,25 @@ BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", "no-reply@example.com")
 # it unset only works while DEBUG=True (local development).
 CRON_SECRET = os.getenv("CRON_SECRET", "")
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+# ---------------------------------------------------------------------------
+# Frontend / Backend URLs
+# ---------------------------------------------------------------------------
+FRONTEND_URL = os.getenv(
+    "FRONTEND_URL",
+    "http://localhost:5173",
+)
+
 # Public base URL of THIS backend, used to build absolute links that must be
 # reachable from outside (e.g. the unsubscribe link embedded in sent emails).
 # In local dev this stays http://localhost:8000 and unsubscribe links simply
 # won't be clickable from outside your machine — that's fine for testing the
 # rest of the flow. In production, set this to your real API domain.
-BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "http://localhost:8000")
+BACKEND_BASE_URL = os.getenv(
+    "BACKEND_BASE_URL",
+    "http://localhost:8000",
+)
+
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -233,25 +334,49 @@ BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "http://localhost:8000")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+
     "formatters": {
         "verbose": {
             "format": "[{asctime}] {levelname} {name}: {message}",
             "style": "{",
         },
     },
+
     "handlers": {
-        "console": {"class": "logging.StreamHandler", "formatter": "verbose"},
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
     },
-    "root": {"handlers": ["console"], "level": "INFO"},
+
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+
     "loggers": {
-        "django": {"handlers": ["console"], "level": "INFO", "propagate": False},
-        "brevo": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
-        "campaigns": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
-        "scheduling": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
+        "django": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+
+        "brevo": {
+            "handlers": ["console"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
+
+        "campaigns": {
+            "handlers": ["console"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
+
+        "scheduling": {
+            "handlers": ["console"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
     },
-}
-REST_FRAMEWORK = {
-    "DEFAULT_RENDERER_CLASSES": [
-        "rest_framework.renderers.JSONRenderer",
-    ],
 }
