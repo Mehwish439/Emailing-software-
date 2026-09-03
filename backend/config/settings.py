@@ -215,7 +215,7 @@ SIMPLE_JWT = {
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 BREVO_API_BASE_URL = os.getenv("BREVO_API_BASE_URL", "https://api.brevo.com/v3")
 BREVO_WEBHOOK_SECRET = os.getenv("BREVO_WEBHOOK_SECRET", "")
-BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "QRM")
+BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "")
 BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", "noreply@example.com")
 
 # Shared secret guarding POST /api/scheduling/process-due/ — the HTTP
