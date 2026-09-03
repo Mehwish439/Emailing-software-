@@ -83,3 +83,18 @@ class AuthenticationTests(APITestCase):
             self.logout_url, {"refresh": refresh}, format="json", HTTP_AUTHORIZATION=f"Bearer {access}"
         )
         self.assertEqual(response.status_code, status.HTTP_205_RESET_CONTENT)
+
+    def test_missing_token_returns_401_not_403(self):
+        """
+        Regression test for the DRF+SimpleJWT quirk that silently downgrades
+        unauthenticated requests from 401 to 403 (see
+        accounts/authentication.py's CustomJWTAuthentication). The frontend's
+        axios interceptor only knows how to recover from a 401 — a 403 here
+        would break the whole app's auth-refresh/redirect-to-login flow.
+        """
+        response = self.client.get(self.me_url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_invalid_token_returns_401_not_403(self):
+        response = self.client.get(self.me_url, HTTP_AUTHORIZATION="Bearer not-a-real-token")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

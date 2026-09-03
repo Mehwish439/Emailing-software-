@@ -5,6 +5,7 @@ from django.db import transaction
 from campaigns.models import Campaign
 from contacts.models import Contact, ContactList
 from email_templates.models import EmailTemplate
+from email_templates.starter_templates import STARTER_TEMPLATES
 
 User = get_user_model()
 
@@ -61,6 +62,20 @@ class Command(BaseCommand):
             },
         )
 
+        # Also seed the full starter-template library (see
+        # email_templates/starter_templates.py) as real, editable templates
+        # for the demo user — gives a fresh account something to look at
+        # in the Templates list beyond just the one welcome template above.
+        created_templates = 0
+        for starter in STARTER_TEMPLATES:
+            _, was_created = EmailTemplate.objects.get_or_create(
+                created_by=user,
+                name=starter["name"],
+                defaults={"subject": starter["subject"], "html_content": starter["html_content"]},
+            )
+            if was_created:
+                created_templates += 1
+
         campaign, _ = Campaign.objects.get_or_create(
             created_by=user,
             name="Demo Welcome Campaign",
@@ -76,5 +91,6 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(
             f"Seed complete. Contacts created this run: {created_contacts}. "
+            f"Starter templates created this run: {created_templates}. "
             f"Login with username='{DEMO_USERNAME}' password='{DEMO_PASSWORD}' (or email='{DEMO_EMAIL}')."
         ))

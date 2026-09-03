@@ -48,8 +48,16 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
     const isAuthEndpoint = originalRequest?.url?.includes("/auth/login") || originalRequest?.url?.includes("/auth/register");
+    // Treat 401 and 403 identically here. With CustomJWTAuthentication on the
+    // backend (accounts/authentication.py), an expired/missing/invalid token
+    // should always come back as 401 — but 403 is included too as a safety
+    // net, since this app has no legitimate per-resource 403 (ownership
+    // filtering returns 404, not 403, for other users' data) and a stray 403
+    // slipping past this check would otherwise leave the UI silently broken
+    // instead of refreshing the token or redirecting to login.
+    const isAuthFailure = error.response?.status === 401 || error.response?.status === 403;
 
-    if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
+    if (isAuthFailure && !originalRequest._retry && !isAuthEndpoint) {
       const refresh = getRefreshToken();
       if (!refresh) {
         clearTokens();

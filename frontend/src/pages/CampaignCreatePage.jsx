@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import DateTimeTimezonePicker from "../components/DateTimeTimezonePicker";
 import { useToast } from "../context/ToastContext";
-import { createCampaign, sendCampaignNow } from "../services/campaignService";
+import { createCampaign, sendCampaignNow, sendTestEmail } from "../services/campaignService";
 import { listContactLists } from "../services/contactService";
 import { createSchedule } from "../services/schedulingService";
 import { listTemplates } from "../services/templateService";
@@ -323,3 +323,56 @@ function Row({ label, value }) {
     </div>
   );
 }
+
+
+
+
+
+function Row({ label, value }) {
+  return (
+    <div className="flex justify-between py-2.5">
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="text-slate-900 font-medium text-right">{value}</dd>
+    </div>
+  );
+}
+
+function Row ({ label, value }) {
+
+  return(
+    <div className="flex justify-between py-2.5">
+      <dt className="text-slate"></dt>
+      <dd className="text-slate-900 font-medium text-right">{value}</dd>
+      
+    </div>
+  )
+}
+
+        <button className="btn-secondary" onClick={handleBack} disabled={step === 0}>
+          Back
+        </button>
+        {step < STEPS.length - 1 ? (
+          <button className="btn-primary" onClick={handleNext} disabled={!canProceed()}>
+            Next
+          </button>
+        ) : (
+          <button className="btn-primary" onClick={handleFinalSubmit} disabled={submitting}>
+            {submitting ? "Submitting…" : sendChoice === "now" ? "Send Campaign" : "Schedule Campaign"}
+          </button>
+        )}
+     
+    <button className="btn-secondary" onClick={handleBack}disabled={step===0}></button>
+function Row ({ label, value }) {
+
+  return(
+    <div className="flex justify-between py-2.5">
+      <dt className="text-slate"></dt>
+      <dd className="text-slate-900 font-medium text-right">{value}</dd>
+      
+    </div>
+  )
+}
+
+
+
+
