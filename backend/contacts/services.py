@@ -25,11 +25,44 @@ class CSVImportError(Exception):
     pass
 
 
+# Invisible/encoding-artifact characters that sometimes end up glued to a
+# cell's value when contact lists are copy-pasted out of Excel/Sheets into a
+# plain-text file (e.g. a stray non-breaking space or zero-width space
+# right before an email address). Python's str.strip() already removes
+# regular whitespace, but not these -- so a perfectly valid email like
+# "info@example.com" can otherwise get rejected as invalid just because of
+# one leftover invisible character.
+_INVISIBLE_CHARS = "\u00a0\u200b\u200c\u200d\ufeff"
+
+
+def _clean(value):
+    if value is None:
+        return ""
+    return value.strip(_INVISIBLE_CHARS + " \t\r\n")
+
+
+def _sniff_dialect(raw_text):
+    """
+    Contact exports don't always come out as comma-delimited -- pasting a
+    spreadsheet into a plain-text file commonly produces a TAB-delimited
+    file instead (Excel's copy behavior), and some exports use semicolons.
+    Sniff the real delimiter from a sample of the file instead of assuming
+    comma, falling back to comma if sniffing can't tell.
+    """
+    sample = raw_text[:4096]
+    try:
+        return csv.Sniffer().sniff(sample, delimiters=",\t;")
+    except csv.Error:
+        return csv.excel  # csv module's default comma dialect
+
+
 def import_contacts_from_csv(owner, file_obj, list_ids=None):
     """
-    Parses an uploaded CSV file and creates Contact records for `owner`.
+    Parses an uploaded CSV/TSV file and creates Contact records for `owner`.
 
     Expected columns: first_name, last_name, email, phone (first_name/last_name/phone optional).
+    The delimiter (comma, tab, or semicolon) is auto-detected rather than
+    assumed, since spreadsheet exports commonly come out tab-delimited.
 
     Returns a dict: {imported, duplicates, invalid, total_processed, errors}
     """
@@ -38,7 +71,8 @@ def import_contacts_from_csv(owner, file_obj, list_ids=None):
     except UnicodeDecodeError as exc:
         raise CSVImportError("The file must be UTF-8 encoded CSV.") from exc
 
-    reader = csv.DictReader(io.StringIO(raw))
+    dialect = _sniff_dialect(raw)
+    reader = csv.DictReader(io.StringIO(raw), dialect=dialect)
     if reader.fieldnames is None:
         raise CSVImportError("The CSV file appears to be empty.")
 
@@ -57,7 +91,7 @@ def import_contacts_from_csv(owner, file_obj, list_ids=None):
 
     for row_number, row in enumerate(reader, start=2):  # header is row 1
         total += 1
-        normalized = {k.strip().lower(): (v or "").strip() for k, v in row.items() if k}
+        normalized = {k.strip().lower(): _clean(v) for k, v in row.items() if k}
         email = normalized.get("email", "").lower()
 
         if not is_valid_email(email):
@@ -83,7 +117,7 @@ def import_contacts_from_csv(owner, file_obj, list_ids=None):
         for raw_header in reader.fieldnames:
             if not raw_header or not raw_header.strip():
                 continue
-            attributes[raw_header.strip()] = (row.get(raw_header) or "").strip()
+            attributes[raw_header.strip()] = _clean(row.get(raw_header))
 
         to_create.append(
             Contact(
