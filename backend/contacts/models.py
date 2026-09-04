@@ -33,7 +33,7 @@ class Contact(TimeStampedModel):
     first_name = models.CharField(max_length=150, blank=True)
     last_name = models.CharField(max_length=150, blank=True)
     email = models.EmailField()
-    phone = models.CharField(max_length=32, blank=True)
+    phone = models.CharField(max_length=100, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     attributes = models.JSONField(default=dict, blank=True)
     lists = models.ManyToManyField(ContactList, related_name="contacts", blank=True)
