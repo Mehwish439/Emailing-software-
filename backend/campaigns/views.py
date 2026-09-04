@@ -50,13 +50,29 @@ class CampaignViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"])
     def preview(self, request, pk=None):
+        from email_templates.rendering import render_template_for_contact
+
         campaign = self.get_object()
+        # Render with a real contact from the campaign's selected lists when
+        # one exists, so the preview shows actual {{variable}} values (and
+        # never raw {{...}} placeholders) instead of just the raw template.
+        sample_contact = campaign.eligible_contacts_queryset().first()
+        if sample_contact is not None:
+            subject, html_content = render_template_for_contact(
+                campaign.subject,
+                campaign.template.html_content,
+                sample_contact,
+                extra_fields={"unsubscribe_url": "#"},
+            )
+        else:
+            subject, html_content = campaign.subject, campaign.template.html_content
+
         return Response(
             {
-                "subject": campaign.subject,
+                "subject": subject,
                 "sender_name": campaign.sender_name,
                 "sender_email": campaign.sender_email,
-                "html_content": campaign.template.html_content,
+                "html_content": html_content,
             }
         )
 

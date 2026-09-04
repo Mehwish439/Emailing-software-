@@ -8,6 +8,7 @@ from django.conf import settings
 
 from common.exceptions import BrevoAPIError
 from contacts.unsubscribe import generate_unsubscribe_token
+from email_templates.rendering import render_template_for_contact
 
 from .client import BrevoClient
 
@@ -23,18 +24,23 @@ def _build_unsubscribe_url(contact_id, campaign_id=None):
     return f"{settings.BACKEND_BASE_URL}/api/unsubscribe/{token}/"
 
 
-def _render_html(html_content, unsubscribe_url):
+def _sample_contact_for_test(campaign, test_email):
     """
-    Replaces the {{unsubscribe_url}} merge tag (used by the "Insert
-    unsubscribe link" button in the template editor) with a real,
-    per-recipient unsubscribe URL. If a template doesn't include the merge
-    tag, the HTML is sent unchanged — the List-Unsubscribe header (added by
-    callers below) still gives recipients a working one-click unsubscribe
-    even without a visible link in the body, but including a visible link is
-    strongly recommended (and required by regulations like CAN-SPAM) — see
-    the "Insert unsubscribe link" button in the template editor.
+    Test sends aren't tied to a real CampaignRecipient, but the template
+    still needs *some* contact to pull {{variable}} values from. Prefer a
+    real eligible contact from the campaign's own lists (so the test email
+    shows real data); fall back to a placeholder with everything but email
+    blank if the campaign has no contacts yet.
     """
-    return html_content.replace("{{unsubscribe_url}}", unsubscribe_url)
+    sample = campaign.eligible_contacts_queryset().first()
+    if sample is not None:
+        return sample
+
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        first_name="", last_name="", email=test_email, phone="", full_name=test_email, attributes={},
+    )
 
 
 def send_test_email(campaign, test_email):
@@ -42,16 +48,24 @@ def send_test_email(campaign, test_email):
     Sends a one-off test email for a campaign via Brevo's transactional endpoint.
     Raises BrevoAPIError on failure — never silently swallowed.
 
-    Test sends don't unsubscribe anyone real, so {{unsubscribe_url}} is
-    replaced with a harmless "#" placeholder rather than a working link, and
-    no List-Unsubscribe header is set.
+    Renders {{variable}} merge tags using a sample contact (see
+    _sample_contact_for_test) so the test reflects what a real recipient
+    would see. Test sends don't unsubscribe anyone real, so
+    {{unsubscribe_url}} is replaced with a harmless "#" placeholder rather
+    than a working link, and no List-Unsubscribe header is set.
     """
     client = BrevoClient()
-    html_content = campaign.template.html_content.replace("{{unsubscribe_url}}", "#")
+    sample_contact = _sample_contact_for_test(campaign, test_email)
+    subject, html_content = render_template_for_contact(
+        f"[TEST] {campaign.subject}",
+        campaign.template.html_content,
+        sample_contact,
+        extra_fields={"unsubscribe_url": "#"},
+    )
     return client.send_transactional_email(
         sender=_sender_payload(campaign),
         to=[{"email": test_email}],
-        subject=f"[TEST] {campaign.subject}",
+        subject=subject,
         html_content=html_content,
         tags=["test-email", f"campaign-{campaign.id}"],
     )
@@ -63,25 +77,33 @@ def send_to_recipient(campaign, recipient):
     transactional endpoint. Returns the Brevo response payload.
     Raises BrevoAPIError on failure so the caller (campaigns.services) can retry.
 
-    Every send includes:
-      - a real {{unsubscribe_url}} substitution, so a template's visible
-        "Unsubscribe" link (see the template editor's "Insert unsubscribe
-        link" button) actually works per-recipient
-      - List-Unsubscribe / List-Unsubscribe-Post headers (RFC 8058), so
-        mailbox providers can offer one-click unsubscribe directly in their
-        UI. This also meaningfully helps inbox placement — bulk mail sent
-        without these headers is one of the more common reasons mailbox
-        providers route messages to spam.
+    Every send:
+      - renders {{variable}} merge tags (subject and HTML) using that
+        contact's own imported data (see email_templates/rendering.py), so
+        every contact gets their own values, never raw {{...}} text
+      - includes a real {{unsubscribe_url}} substitution, so a template's
+        visible "Unsubscribe" link (see the template editor's "Insert
+        unsubscribe link" button) actually works per-recipient
+      - includes List-Unsubscribe / List-Unsubscribe-Post headers (RFC 8058),
+        so mailbox providers can offer one-click unsubscribe directly in
+        their UI. This also meaningfully helps inbox placement — bulk mail
+        sent without these headers is one of the more common reasons
+        mailbox providers route messages to spam.
     """
     client = BrevoClient()
     contact = recipient.contact
     unsubscribe_url = _build_unsubscribe_url(contact.id, campaign.id)
-    html_content = _render_html(campaign.template.html_content, unsubscribe_url)
+    subject, html_content = render_template_for_contact(
+        campaign.subject,
+        campaign.template.html_content,
+        contact,
+        extra_fields={"unsubscribe_url": unsubscribe_url},
+    )
 
     return client.send_transactional_email(
         sender=_sender_payload(campaign),
         to=[{"email": contact.email, "name": contact.full_name}],
-        subject=campaign.subject,
+        subject=subject,
         html_content=html_content,
         tags=[f"campaign-{campaign.id}"],
         headers={

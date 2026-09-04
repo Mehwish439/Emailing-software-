@@ -33,8 +33,22 @@ class EmailTemplateViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"])
     def preview(self, request, pk=None):
+        from contacts.models import Contact
+
+        from .rendering import render_template_for_contact
+
         template = self.get_object()
-        return Response({"subject": template.subject, "html_content": template.html_content})
+        # A template isn't tied to any particular campaign/contact list, so
+        # fall back to any one of this user's own contacts (if they have
+        # one) to show real {{variable}} values here too.
+        sample_contact = Contact.objects.filter(owner=request.user).first()
+        if sample_contact is not None:
+            subject, html_content = render_template_for_contact(
+                template.subject, template.html_content, sample_contact, extra_fields={"unsubscribe_url": "#"}
+            )
+        else:
+            subject, html_content = template.subject, template.html_content
+        return Response({"subject": subject, "html_content": html_content})
 
     @action(detail=True, methods=["post"])
     def duplicate(self, request, pk=None):

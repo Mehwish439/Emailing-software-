@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import Modal from "../components/Modal";
 import Spinner from "../components/Spinner";
 import { useToast } from "../context/ToastContext";
+import { getMergeFields } from "../services/contactService";
 import {
   createTemplate,
   getTemplate,
@@ -41,6 +42,11 @@ export default function TemplateEditorPage() {
   const [starters, setStarters] = useState([]);
   const [startersLoading, setStartersLoading] = useState(!isEditing);
 
+  // Fields available from the user's imported contacts (standard fields
+  // like email/first_name plus every CSV/Excel column that's been
+  // imported), used to populate the "Insert Variable" dropdown below.
+  const [mergeFields, setMergeFields] = useState([]);
+
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [imageTab, setImageTab] = useState("upload"); // "upload" | "url"
   const [imageUrl, setImageUrl] = useState("");
@@ -59,6 +65,9 @@ export default function TemplateEditorPage() {
         .then((data) => setStarters(data))
         .finally(() => setStartersLoading(false));
     }
+    getMergeFields()
+      .then((data) => setMergeFields(data.fields || []))
+      .catch(() => setMergeFields([]));
   }, [id, isEditing]);
 
   const handleSubmit = async (e) => {
@@ -110,6 +119,11 @@ export default function TemplateEditorPage() {
       const newPos = start + snippet.length;
       el.setSelectionRange(newPos, newPos);
     });
+  };
+
+  const insertVariable = (fieldName) => {
+    if (!fieldName) return;
+    insertAtCursor(`{{${fieldName}}}`);
   };
 
   const insertUnsubscribeLink = () => {
@@ -269,6 +283,23 @@ export default function TemplateEditorPage() {
             <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
               <label className="label mb-0">HTML content</label>
               <div className="flex items-center gap-3">
+                {mergeFields.length > 0 && (
+                  <select
+                    className="text-xs border border-slate-200 rounded-md py-1 pl-1.5 pr-1 text-brand-600 bg-white"
+                    value=""
+                    onChange={(e) => insertVariable(e.target.value)}
+                    title="Insert a variable from your imported contacts"
+                  >
+                    <option value="" disabled>
+                      Insert variable…
+                    </option>
+                    {mergeFields.map((field) => (
+                      <option key={field} value={field}>
+                        {`{{${field}}}`}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button type="button" className="text-xs text-brand-600 hover:underline" onClick={openImageModal}>
                   Insert image
                 </button>

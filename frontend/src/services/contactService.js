@@ -24,6 +24,11 @@ export async function bulkDeleteContacts(ids) {
   return data;
 }
 
+export async function getMergeFields() {
+  const { data } = await api.get("/contacts/merge-fields/");
+  return data;
+}
+
 export async function importContactsCSV(file, listIds = []) {
   const formData = new FormData();
   formData.append("file", file);

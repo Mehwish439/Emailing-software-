@@ -14,7 +14,7 @@ from .serializers import (
     ContactSerializer,
     ListMembershipSerializer,
 )
-from .services import CSVImportError, import_contacts_from_csv
+from .services import STANDARD_MERGE_FIELDS, CSVImportError, import_contacts_from_csv
 from .services_suppression import add_suppression
 from .unsubscribe import parse_unsubscribe_token
 
@@ -67,6 +67,32 @@ class ContactViewSet(viewsets.ModelViewSet):
         except CSVImportError as exc:
             return Response({"detail": str(exc)}, status=400)
         return Response(CSVImportResultSerializer(result).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"], url_path="merge-fields")
+    def merge_fields(self, request):
+        """
+        GET /api/contacts/merge-fields/
+
+        Returns every template variable available for this user's contacts:
+        the standard Contact fields plus every column preserved from
+        CSV/Excel imports (Contact.attributes — see services.py). Powers the
+        "Insert Variable" dropdown in the template editor.
+        """
+        fields = list(STANDARD_MERGE_FIELDS)
+        seen = set(fields)
+
+        attributes_by_contact = Contact.objects.filter(owner=request.user).exclude(
+            attributes={}
+        ).values_list("attributes", flat=True)
+        for attributes in attributes_by_contact:
+            if not isinstance(attributes, dict):
+                continue
+            for key in attributes.keys():
+                if key not in seen:
+                    seen.add(key)
+                    fields.append(key)
+
+        return Response({"fields": fields})
 
     @action(detail=False, methods=["post"], url_path="add-to-list")
     def add_to_list(self, request):

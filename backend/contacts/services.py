@@ -13,6 +13,13 @@ logger = logging.getLogger(__name__)
 REQUIRED_HEADERS = {"email"}
 OPTIONAL_HEADERS = {"first_name", "last_name", "phone"}
 
+# Contact fields that always exist as dedicated model columns (as opposed to
+# arbitrary imported columns, which live in Contact.attributes). Used to seed
+# the "Insert Variable" dropdown in the template editor alongside whatever
+# columns a given CSV import contributes. Keep in sync with
+# email_templates.rendering.get_contact_merge_fields().
+STANDARD_MERGE_FIELDS = ["first_name", "last_name", "email", "phone", "full_name"]
+
 
 class CSVImportError(Exception):
     pass
@@ -63,6 +70,21 @@ def import_contacts_from_csv(owner, file_obj, list_ids=None):
             continue
 
         seen_in_file.add(email)
+
+        # Preserve EVERY column from the uploaded file, under its original
+        # header text (e.g. "First_name", "COMPANY WEBSITE", "POSTAL
+        # ADDRESS"), as a per-contact attribute -- not just the handful of
+        # columns (first_name/last_name/phone) that map to dedicated model
+        # fields above. This is what makes any imported column available as
+        # a {{variable}} template placeholder later (see
+        # email_templates/rendering.py), without hard-coding which columns
+        # are supported.
+        attributes = {}
+        for raw_header in reader.fieldnames:
+            if not raw_header or not raw_header.strip():
+                continue
+            attributes[raw_header.strip()] = (row.get(raw_header) or "").strip()
+
         to_create.append(
             Contact(
                 owner=owner,
@@ -71,6 +93,7 @@ def import_contacts_from_csv(owner, file_obj, list_ids=None):
                 last_name=normalized.get("last_name", ""),
                 phone=normalized.get("phone", ""),
                 status=Contact.Status.ACTIVE,
+                attributes=attributes,
             )
         )
 
