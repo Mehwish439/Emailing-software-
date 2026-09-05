@@ -115,9 +115,11 @@ def upload_template_image(request):
         size_bytes=file_obj.size,
     )
 
-    from django.conf import settings
-
-    url = f"{settings.BACKEND_BASE_URL}/api/templates/images/{image.id}/content/"
+    # Built from the actual incoming request (scheme + host), not the
+    # BACKEND_BASE_URL setting -- so this can't end up pointing at
+    # "localhost" (or any other stale value) just because that env var
+    # wasn't set/updated on whatever's actually serving this request.
+    url = request.build_absolute_uri(f"/api/templates/images/{image.id}/content/")
     return Response({"id": image.id, "url": url}, status=status.HTTP_201_CREATED)
 
 
