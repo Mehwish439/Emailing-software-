@@ -1,11 +1,12 @@
 import logging
 import zoneinfo
 
-from django.db import connection, transaction
+from django.db import transaction
 from django.utils import timezone as dj_timezone
 
 from campaigns.models import Campaign
 from campaigns.services import validate_campaign_sendable
+from common.db import select_for_update_kwargs
 from common.exceptions import ValidationAppError
 
 from .models import ScheduledCampaign
@@ -102,13 +103,6 @@ def cancel_schedule(schedule: ScheduledCampaign):
 # claim-then-lock logic below.
 # ---------------------------------------------------------------------------
 
-def _select_for_update_kwargs():
-    """SKIP LOCKED only where the DB backend actually supports it (e.g. Postgres/Supabase)."""
-    if connection.features.has_select_for_update_skip_locked:
-        return {"skip_locked": True}
-    return {}
-
-
 @transaction.atomic
 def _claim_next_due_schedule():
     """
@@ -119,7 +113,7 @@ def _claim_next_due_schedule():
     module docstring. Returns None when nothing is due.
     """
     schedule = (
-        ScheduledCampaign.objects.select_for_update(**_select_for_update_kwargs())
+        ScheduledCampaign.objects.select_for_update(**select_for_update_kwargs())
         .select_related("campaign")
         .filter(status=ScheduledCampaign.Status.SCHEDULED, scheduled_at__lte=dj_timezone.now())
         .order_by("scheduled_at")
@@ -141,6 +135,19 @@ def _mark_schedule_failed(schedule, message):
 
 
 def _process_one_schedule(schedule):
+    """
+    Sends this schedule's campaign. NOTE: send_campaign_now() only sends one
+    bounded batch of recipients per call (see campaigns.services'
+    CAMPAIGN_SEND_BATCH_SIZE) -- for a campaign with more recipients than
+    that, this schedule will still be PROCESSING (not COMPLETED) when this
+    returns, and campaigns.services.resume_stuck_campaigns() (called at the
+    end of process_due_schedules(), below) picks up its next batch on every
+    subsequent run until it's actually done. That's what makes a large
+    campaign resilient to a single request/cron-tick timing out partway
+    through -- see campaigns.services._finalize_campaign for where a
+    schedule actually gets marked COMPLETED/FAILED, once its campaign
+    truly has no PENDING recipients left.
+    """
     from campaigns.services import send_campaign_now
 
     try:
@@ -154,18 +161,20 @@ def _process_one_schedule(schedule):
         _mark_schedule_failed(schedule, detail)
         return {"schedule_id": schedule.id, "campaign_id": schedule.campaign_id, "result": "failed", "detail": detail}
 
-    schedule.status = ScheduledCampaign.Status.COMPLETED
-    schedule.completed_at = dj_timezone.now()
-    schedule.save(update_fields=["status", "completed_at", "updated_at"])
-    return {"schedule_id": schedule.id, "campaign_id": schedule.campaign_id, "result": "sent"}
+    schedule.refresh_from_db()
+    result = "sent" if schedule.status == ScheduledCampaign.Status.COMPLETED else "batch_sent"
+    return {"schedule_id": schedule.id, "campaign_id": schedule.campaign_id, "result": result}
 
 
 def process_due_schedules():
     """
-    Finds and sends every currently-due ScheduledCampaign, one at a time.
-    Returns a list of per-schedule result dicts:
-        {"schedule_id": ..., "campaign_id": ..., "result": "sent"}
-        {"schedule_id": ..., "campaign_id": ..., "result": "failed", "detail": "..."}
+    Finds and sends every currently-due ScheduledCampaign, one at a time,
+    then continues any campaign (scheduled or "Send Now") still stuck in
+    PROCESSING with recipients left PENDING from a previous, cut-off run.
+    Returns a list of per-item result dicts:
+        {"schedule_id"/"campaign_id": ..., "result": "sent"}
+        {"schedule_id"/"campaign_id": ..., "result": "batch_sent"}  -- more batches still to go
+        {"schedule_id"/"campaign_id": ..., "result": "failed", "detail": "..."}
     """
     logger.info("process_due_schedules: run started at %s", dj_timezone.now().isoformat())
     results = []
@@ -180,6 +189,29 @@ def process_due_schedules():
         result = _process_one_schedule(schedule)
         logger.info("process_due_schedules: result=%s", result)
         results.append(result)
+
+    # Resume anything left stuck in PROCESSING with PENDING recipients --
+    # e.g. a batch cut off by a request timeout on a previous run of this
+    # same function, or a "Send Now" campaign (no ScheduledCampaign row at
+    # all) that got cut off mid-request. This is also what safely recovers
+    # any campaign that was already stuck before this fix existed: the very
+    # next time this runs (cron calls it every minute), it picks them back
+    # up automatically.
+    from campaigns.services import resume_stuck_campaigns
+
+    resumed = resume_stuck_campaigns()
+    for r in resumed:
+        logger.info("process_due_schedules: resumed campaign_id=%s -> status=%s", r["campaign_id"], r["status"])
+        if r["status"] == Campaign.Status.PROCESSING:
+            mapped_result = "batch_sent"
+        elif r["status"] == Campaign.Status.SENT:
+            mapped_result = "sent"
+        else:
+            mapped_result = "failed"
+        entry = {"campaign_id": r["campaign_id"], "result": mapped_result}
+        if mapped_result == "failed":
+            entry["detail"] = f"Campaign ended in status '{r['status']}' — see the campaign's failure_reason."
+        results.append(entry)
 
     if not results:
         logger.info(

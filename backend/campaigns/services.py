@@ -4,20 +4,32 @@ management command) call these functions; these functions call
 brevo/services.py for anything that talks to the Brevo API. No Brevo logic
 or raw DB queries belong directly in views.py.
 
-Sending is synchronous: there is no task queue in this architecture. Both
-"send now" (via the API) and scheduled sends (via the cron-driven
-process_scheduled_campaigns command) call send_campaign_now(), which blocks
-until every recipient has been attempted. For an MVP campaign platform this
-keeps the architecture simple (no Redis/Celery); if campaign sizes grow large
-enough that this becomes too slow for an HTTP request, "send now" is the only
-caller in the request/response path — scheduled sends already run out-of-band
-via cron, so they're unaffected by that concern.
+Sending is synchronous and BATCHED: there is no task queue in this
+architecture, and Render's gunicorn is configured with --timeout 30, which
+will hard-kill any single request running longer than that (see
+render.yaml). A campaign with more recipients than fit in that window
+(each Brevo API call + DB write takes real time) would previously get cut
+off mid-send, leaving it stuck in PROCESSING forever with the remaining
+recipients still PENDING -- see resume_stuck_campaigns() below for how
+that's now recovered.
+
+So instead of sending every recipient in one call, send_campaign_now()
+sends up to CAMPAIGN_SEND_BATCH_SIZE recipients per call and returns,
+leaving the campaign in PROCESSING if any are still PENDING.
+scheduling.services.process_due_schedules() (triggered every minute by
+cron/an external pinger -- see scheduling/views.py) calls
+resume_stuck_campaigns() on every run specifically to keep sending a large
+campaign's remaining batches, in addition to starting newly-due schedules.
+This is also what safely resumes any campaign already stuck in PROCESSING
+from before this fix existed, automatically, without a one-off script.
 """
 import logging
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from common.db import select_for_update_kwargs
 from common.exceptions import BrevoAPIError, ValidationAppError
 from contacts.services_suppression import filter_out_suppressed
 
@@ -73,6 +85,11 @@ def _claim_campaign_for_sending(campaign_id):
     snapshots recipients, and flips status to PROCESSING inside the same
     transaction so the claim is atomic.
     """
+    # No skip_locked here (unlike the resume/schedule-claim queries below) --
+    # this targets one specific known row by ID, so a concurrent claim
+    # should briefly wait for the lock and then correctly fail
+    # validate_campaign_sendable() (status will have moved on), not skip
+    # itself and raise DoesNotExist.
     campaign = Campaign.objects.select_for_update().get(id=campaign_id)
     validate_campaign_sendable(campaign)
     build_recipient_snapshot(campaign)
@@ -83,14 +100,24 @@ def _claim_campaign_for_sending(campaign_id):
 
 def _send_pending_recipients(campaign: Campaign):
     """
-    Synchronously sends the campaign to every PENDING recipient via Brevo.
-    Retries a small, fixed number of times on transient BrevoAPIError before
-    marking that individual recipient FAILED and moving on — one recipient's
-    failure never aborts the rest of the send.
+    Sends up to CAMPAIGN_SEND_BATCH_SIZE PENDING recipients via Brevo (not
+    necessarily all of them — see the module docstring for why). Retries a
+    small, fixed number of times on transient BrevoAPIError before marking
+    that individual recipient FAILED and moving on — one recipient's
+    failure never aborts the rest of the batch.
+
+    Safe to call again on the same campaign for its next batch: it always
+    re-queries for whatever's still PENDING, so recipients already marked
+    SENT/FAILED by a previous batch are simply never selected again — this
+    is what keeps resumed batches from ever double-sending someone.
     """
     from brevo.services import send_to_recipient
 
-    pending = campaign.recipients.filter(status=CampaignRecipient.Status.PENDING).select_related("contact")
+    pending = (
+        campaign.recipients.filter(status=CampaignRecipient.Status.PENDING)
+        .select_related("contact")
+        .order_by("id")[: settings.CAMPAIGN_SEND_BATCH_SIZE]
+    )
 
     for recipient in pending:
         last_error = None
@@ -116,13 +143,51 @@ def _send_pending_recipients(campaign: Campaign):
         recipient.save(update_fields=["status", "sent_at", "updated_at"])
 
 
+def _sync_schedule_on_finalize(campaign: Campaign):
+    """
+    If this campaign was started via a schedule (scheduling.models.
+    ScheduledCampaign), reflects the campaign's now-final status onto that
+    schedule row too -- this is the piece that was missing before: a
+    campaign could reach SENT/FAILED while its schedule stayed at
+    PROCESSING forever, which is exactly why the scheduler kept reporting
+    "no due schedules found" even with a campaign still (invisibly) needing
+    attention. Local import avoids a circular import (scheduling already
+    imports from campaigns).
+    """
+    from scheduling.models import ScheduledCampaign
+
+    schedule = getattr(campaign, "schedule", None)
+    if schedule is None or schedule.status != ScheduledCampaign.Status.PROCESSING:
+        return
+
+    if campaign.status == Campaign.Status.SENT:
+        schedule.status = ScheduledCampaign.Status.COMPLETED
+        schedule.completed_at = timezone.now()
+        schedule.save(update_fields=["status", "completed_at", "updated_at"])
+    elif campaign.status == Campaign.Status.FAILED:
+        schedule.status = ScheduledCampaign.Status.FAILED
+        schedule.error_message = campaign.failure_reason
+        schedule.save(update_fields=["status", "error_message", "updated_at"])
+
+
 def _finalize_campaign(campaign: Campaign):
-    """Marks the campaign SENT once sending is done, or FAILED if every recipient failed."""
+    """
+    Marks the campaign SENT once every recipient has reached a terminal
+    state (sent or failed), or FAILED if every recipient failed. If any
+    recipients are still PENDING -- because _send_pending_recipients only
+    processes one bounded batch per call -- the campaign is deliberately
+    left in PROCESSING so the next run (see resume_stuck_campaigns) sends
+    the remaining batch, instead of being incorrectly marked done early.
+    """
     campaign.refresh_from_db()
     if campaign.status != Campaign.Status.PROCESSING:
         return  # already finalized/cancelled by something else
 
     recipients = campaign.recipients.all()
+    pending_count = recipients.filter(status=CampaignRecipient.Status.PENDING).count()
+    if pending_count > 0:
+        return  # more batches still to go — leave PROCESSING for the next run
+
     total = recipients.count()
     failed = recipients.filter(status=CampaignRecipient.Status.FAILED).count()
 
@@ -133,13 +198,78 @@ def _finalize_campaign(campaign: Campaign):
     else:
         mark_campaign_sent(campaign)
 
+    _sync_schedule_on_finalize(campaign)
+
+
+def _claim_stuck_campaign_for_resume(campaign_id):
+    """
+    Mirrors _claim_campaign_for_sending's row-locking, but for a campaign
+    that's already PROCESSING (started by a previous batch) rather than one
+    being started for the first time -- so two overlapping cron runs can
+    never grab the same campaign's next batch at once. skip_locked here is
+    correct (unlike _claim_campaign_for_sending above): this is scanning
+    for "any of several stuck campaigns", so one already locked by a
+    concurrent run should just be skipped this pass, not waited on. Returns
+    None if the campaign isn't actually still processing/available (already
+    finished or claimed by a concurrent run).
+    """
+    with transaction.atomic():
+        return (
+            Campaign.objects.select_for_update(**select_for_update_kwargs())
+            .filter(id=campaign_id, status=Campaign.Status.PROCESSING)
+            .first()
+        )
+
+
+def resume_stuck_campaigns():
+    """
+    Continues sending any campaign left in PROCESSING with recipients still
+    PENDING -- whether it originally started via "Send Now" (cut off
+    mid-HTTP-request) or a schedule (cut off mid cron-triggered batch). Call
+    this on every cron tick (see scheduling.services.process_due_schedules)
+    alongside picking up newly-due schedules, so a large campaign's send
+    survives request timeouts by spreading across as many calls as it
+    needs -- each sends up to CAMPAIGN_SEND_BATCH_SIZE more, and the
+    campaign finalizes itself (see _finalize_campaign) the moment nothing
+    PENDING is left. This is also the recovery path for any campaign
+    already stuck in PROCESSING from before this fix existed.
+
+    Returns a list of {"campaign_id": ..., "status": <new campaign status>}.
+    """
+    stuck_ids = list(
+        Campaign.objects.filter(
+            status=Campaign.Status.PROCESSING,
+            recipients__status=CampaignRecipient.Status.PENDING,
+        )
+        .distinct()
+        .values_list("id", flat=True)
+    )
+
+    results = []
+    for campaign_id in stuck_ids:
+        campaign = _claim_stuck_campaign_for_resume(campaign_id)
+        if campaign is None:
+            continue  # finished, or already being resumed by a concurrent run
+        logger.info("resume_stuck_campaigns: sending next batch for campaign_id=%s", campaign.id)
+        _send_pending_recipients(campaign)
+        _finalize_campaign(campaign)
+        campaign.refresh_from_db()
+        results.append({"campaign_id": campaign.id, "status": campaign.status})
+    return results
+
 
 def send_campaign_now(campaign: Campaign):
     """
-    Sends a campaign immediately and synchronously. Used by both the
-    "Send Now" API endpoint and scheduling's process_scheduled_campaigns
-    management command — the single place campaign-sending logic lives, so
-    neither caller duplicates it.
+    Claims the campaign and sends its first batch (up to
+    CAMPAIGN_SEND_BATCH_SIZE recipients) immediately and synchronously. Used
+    by both the "Send Now" API endpoint and scheduling's
+    process_scheduled_campaigns command/process-due endpoint — the single
+    place campaign-sending logic lives, so neither caller duplicates it.
+
+    For a campaign with more recipients than one batch, the returned
+    campaign will still have status PROCESSING — that's expected, not an
+    error; scheduling.services.process_due_schedules() (cron-driven, every
+    minute) will keep calling resume_stuck_campaigns() until it's SENT.
     """
     campaign = _claim_campaign_for_sending(campaign.id)
     _send_pending_recipients(campaign)

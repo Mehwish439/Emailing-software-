@@ -57,11 +57,18 @@ class Command(BaseCommand):
             return
 
         for r in results:
+            # Entries come from two sources with slightly different shapes:
+            # newly-claimed schedules include "schedule_id"; campaigns
+            # resumed mid-send (see campaigns.services.resume_stuck_campaigns)
+            # only have "campaign_id" — fall back to that for the label.
+            label = f"Schedule {r['schedule_id']} (campaign {r['campaign_id']})" if "schedule_id" in r else f"Campaign {r['campaign_id']}"
             if r["result"] == "sent":
-                self.stdout.write(self.style.SUCCESS(f"Schedule {r['schedule_id']} (campaign {r['campaign_id']}) sent."))
+                self.stdout.write(self.style.SUCCESS(f"{label} sent."))
+            elif r["result"] == "batch_sent":
+                self.stdout.write(f"{label} sent a batch — more recipients still pending, will continue next run.")
             else:
-                self.stderr.write(self.style.ERROR(f"Schedule {r['schedule_id']} failed: {r['detail']}"))
+                self.stderr.write(self.style.ERROR(f"{label} failed: {r.get('detail', 'unknown error')}"))
 
         self.stdout.write(
-            self.style.SUCCESS(f"process_scheduled_campaigns: processed {len(results)} due schedule(s).")
+            self.style.SUCCESS(f"process_scheduled_campaigns: processed {len(results)} item(s).")
         )

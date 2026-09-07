@@ -1,4 +1,3 @@
-
 """
 Django settings for the Email Campaign Management Platform.
 All sensitive/configurable values are pulled from environment variables (.env).
@@ -36,6 +35,15 @@ ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
 _render_hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME")
 if _render_hostname:
     ALLOWED_HOSTS.append(_render_hostname)
+
+# Render (and most PaaS hosts) terminate TLS at their edge proxy and forward
+# requests to this app as plain HTTP, adding an X-Forwarded-Proto header
+# saying what the original request actually was. Without this,
+# request.is_secure() -- and anything built from request.build_absolute_uri(),
+# e.g. the uploaded-image URL in email_templates/views.py -- would report
+# "http" even for a real HTTPS request, producing a link the browser then
+# blocks as mixed content on an HTTPS page.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -308,6 +316,16 @@ BREVO_SENDER_EMAIL = os.getenv(
 # it unset only works while DEBUG=True (local development).
 CRON_SECRET = os.getenv("CRON_SECRET", "")
 
+# How many recipients a single call to campaigns.services.send_campaign_now()
+# will actually send, per campaign. Chosen with real headroom under
+# gunicorn's --timeout 30 (see the startCommand in render.yaml) — each
+# recipient is one live Brevo API call (plus possible retries on transient
+# failures), so this bounds a single call/cron-tick to a duration that
+# comfortably won't get killed mid-batch. A campaign with more recipients
+# than this simply sends across multiple cron ticks instead of one — see
+# campaigns/services.py's module docstring and resume_stuck_campaigns().
+CAMPAIGN_SEND_BATCH_SIZE = int(os.getenv("CAMPAIGN_SEND_BATCH_SIZE", "20"))
+
 
 # ---------------------------------------------------------------------------
 # Frontend / Backend URLs
@@ -318,10 +336,16 @@ FRONTEND_URL = os.getenv(
 )
 
 # Public base URL of THIS backend, used to build absolute links that must be
-# reachable from outside (e.g. the unsubscribe link embedded in sent emails).
-# In local dev this stays http://localhost:8000 and unsubscribe links simply
-# won't be clickable from outside your machine — that's fine for testing the
-# rest of the flow. In production, set this to your real API domain.
+# reachable from outside AND from contexts with no HTTP request to derive a
+# host from (e.g. the unsubscribe link embedded in an email sent by a
+# scheduled/background job -- see brevo/services.py). In local dev this
+# stays http://localhost:8000. In production, set this to your real API
+# domain.
+#
+# NOTE: the uploaded-template-image URL (email_templates/views.py) does NOT
+# use this anymore -- it derives its URL from the actual incoming request
+# instead, so a forgotten/incorrect BACKEND_BASE_URL can no longer break
+# inserted images the way it used to.
 BACKEND_BASE_URL = os.getenv(
     "BACKEND_BASE_URL",
     "http://localhost:8000",
