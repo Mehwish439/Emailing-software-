@@ -31,6 +31,7 @@ from django.utils import timezone
 
 from common.db import select_for_update_kwargs
 from common.exceptions import BrevoAPIError, ValidationAppError
+from contacts.models import Suppression
 from contacts.services_suppression import filter_out_suppressed
 
 from .models import Campaign, CampaignRecipient
@@ -110,16 +111,47 @@ def _send_pending_recipients(campaign: Campaign):
     re-queries for whatever's still PENDING, so recipients already marked
     SENT/FAILED by a previous batch are simply never selected again — this
     is what keeps resumed batches from ever double-sending someone.
+
+    Re-checks suppression here, not just at snapshot time
+    (build_recipient_snapshot / eligible_contacts_queryset): a
+    CampaignRecipient row can sit PENDING for a long time (a scheduled
+    campaign waiting for its send time, or a batch waiting for its next
+    cron tick) and the contact can become suppressed (hard bounce, spam
+    complaint, unsubscribe) on a DIFFERENT campaign in the meantime. Without
+    this second check, that stale PENDING row would still get sent —
+    exactly what happened with a contact that hard-bounced on one campaign
+    and was then still mailed by another, already-snapshotted campaign a
+    couple of days later.
     """
     from brevo.services import send_to_recipient
 
-    pending = (
+    pending = list(
         campaign.recipients.filter(status=CampaignRecipient.Status.PENDING)
         .select_related("contact")
         .order_by("id")[: settings.CAMPAIGN_SEND_BATCH_SIZE]
     )
+    if not pending:
+        return
+
+    batch_emails = {r.contact.email for r in pending}
+    suppressed_emails = set(
+        Suppression.objects.filter(email__in=batch_emails).values_list("email", flat=True)
+    )
 
     for recipient in pending:
+        if recipient.contact.email in suppressed_emails:
+            logger.info(
+                "Skipping recipient=%s (%s) for campaign=%s — contact was suppressed after this "
+                "campaign's recipient snapshot was taken.",
+                recipient.id, recipient.contact.email, campaign.id,
+            )
+            # BLOCKED is the closest existing status for "deliberately not
+            # sent because they're suppressed" — matches the same word Brevo
+            # itself uses when its own blocklist stops a send.
+            recipient.status = CampaignRecipient.Status.BLOCKED
+            recipient.save(update_fields=["status", "updated_at"])
+            continue
+
         last_error = None
         for attempt in range(1, MAX_SEND_ATTEMPTS + 1):
             try:

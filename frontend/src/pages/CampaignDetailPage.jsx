@@ -27,6 +27,9 @@ export default function CampaignDetailPage() {
   const [campaign, setCampaign] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [recipients, setRecipients] = useState([]);
+  const [recipientsPage, setRecipientsPage] = useState(1);
+  const [recipientsHasMore, setRecipientsHasMore] = useState(false);
+  const [loadingMoreRecipients, setLoadingMoreRecipients] = useState(false);
   const [schedule, setSchedule] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -45,25 +48,55 @@ export default function CampaignDetailPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [campaignData, recipientsData] = await Promise.all([
+      // All three independent requests fire in parallel (not one-after-
+      // another) so the page's total load time is roughly the SLOWEST of
+      // the three, not the sum of all three — this matters a lot on a
+      // backend/database pairing with real network latency between them.
+      // listScheduledCampaigns used to only be fetched afterward (and only
+      // for scheduled/processing campaigns), adding a full extra sequential
+      // round trip; fetching it here unconditionally costs nothing when
+      // it's not needed, since setSchedule below only actually uses it for
+      // those statuses.
+      const [campaignData, recipientsData, schedulesData] = await Promise.all([
         getCampaign(id),
-        getCampaignRecipients(id, { page_size: 10 }),
+        // 50 per page (not the previous hardcoded 10) so most campaigns show
+        // everyone at a glance; "Load more" below fetches further pages for
+        // anything bigger, using the same page_size/next-page pattern the
+        // backend already supports (see common/pagination.py).
+        getCampaignRecipients(id, { page: 1, page_size: 50 }),
+        listScheduledCampaigns().catch(() => null),
       ]);
       setCampaign(campaignData);
       setRecipients(recipientsData.results || []);
+      setRecipientsPage(1);
+      setRecipientsHasMore(Boolean(recipientsData.next));
 
       if (campaignData.status !== "draft") {
         getCampaignAnalytics(id).then(setAnalytics).catch(() => {});
       }
-      if (["scheduled", "processing"].includes(campaignData.status)) {
-        const schedules = await listScheduledCampaigns();
-        const active = (schedules.results || schedules || []).find(
+      if (["scheduled", "processing"].includes(campaignData.status) && schedulesData) {
+        const active = (schedulesData.results || schedulesData || []).find(
           (s) => String(s.campaign) === String(id) && s.status === "scheduled"
         );
         setSchedule(active || null);
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMoreRecipients = async () => {
+    setLoadingMoreRecipients(true);
+    try {
+      const nextPage = recipientsPage + 1;
+      const data = await getCampaignRecipients(id, { page: nextPage, page_size: 50 });
+      setRecipients((prev) => [...prev, ...(data.results || [])]);
+      setRecipientsPage(nextPage);
+      setRecipientsHasMore(Boolean(data.next));
+    } catch {
+      showToast("Failed to load more recipients.", "error");
+    } finally {
+      setLoadingMoreRecipients(false);
     }
   };
 
@@ -279,6 +312,20 @@ export default function CampaignDetailPage() {
               ))}
             </tbody>
           </table>
+        )}
+        {recipientsHasMore && (
+          <div className="px-5 py-4 border-t border-slate-100 text-center">
+            <button
+              type="button"
+              className="text-sm font-medium text-brand-600 hover:underline disabled:opacity-50"
+              onClick={loadMoreRecipients}
+              disabled={loadingMoreRecipients}
+            >
+              {loadingMoreRecipients
+                ? "Loading…"
+                : `Load more (showing ${recipients.length} of ${campaign.recipient_count})`}
+            </button>
+          </div>
         )}
       </div>
 

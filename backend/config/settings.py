@@ -114,20 +114,24 @@ ASGI_APPLICATION = "config.asgi.application"
 # connects to it exactly like any other PostgreSQL database via the
 # standard ORM — Supabase's REST/client APIs are not used anywhere here.
 #
-# conn_max_age=0 (rather than a long-lived pool) is deliberate: this app has
-# no long-running worker process holding connections open (no Celery), and
-# Supabase's own pooler (pgbouncer, on the "Connection pooling" host/port in
-# your Supabase dashboard) is the recommended place to pool connections for
-# a typical web-request-driven Django app plus periodic cron invocations.
-# If you connect directly to Supabase's non-pooled host instead, conn_max_age
-# can be safely raised.
+# conn_max_age=60 (persistent connections) rather than 0: gunicorn here runs
+# as a genuinely long-lived process (see render.yaml's startCommand), so
+# each worker can safely reuse one connection across requests instead of
+# opening a brand-new one (full TCP+TLS handshake) every single request.
+# This matters a lot in practice when the database is geographically far
+# from where the backend is deployed (e.g. Render US/EU regions talking to
+# a Supabase project in a different region) — that round trip was
+# previously being paid on every request, not just once per worker.
+# conn_health_checks=True guards against reusing a connection that Supabase's
+# pooler (pgbouncer) may have silently closed while idle.
 DATABASES = {
     "default": dj_database_url.config(
         default=os.getenv(
             "DATABASE_URL",
             "postgres://campaign_user:campaign_pass@localhost:5432/email_campaign_db",
         ),
-        conn_max_age=0,
+        conn_max_age=60,
+        conn_health_checks=True,
     )
 }
 
