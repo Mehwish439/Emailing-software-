@@ -154,13 +154,35 @@ def process_webhook_event(payload: dict):
 
     timestamp = _extract_timestamp(payload)
 
+    metadata = dict(payload)
+    if internal_event == "clicked":
+        # Brevo's own click-tracking system (which wraps every <a href> in
+        # the sent HTML, including the unsubscribe link) is what actually
+        # counts these clicks — we only ever learn about it via whatever
+        # this webhook payload includes. Brevo's documented field for the
+        # clicked URL is "link" — checking a couple of alternate spellings
+        # defensively in case that varies by payload version. If NONE of
+        # these are present, per-URL breakdown simply won't be available
+        # for that event (still counted as a generic click) — inspect a
+        # real stored payload (CampaignEvent.objects.filter(event_type=
+        # "clicked").first().metadata) to confirm exactly what your Brevo
+        # account sends, since this can change over time / by plan.
+        clicked_url = payload.get("link") or payload.get("url") or payload.get("URL") or ""
+        metadata["clicked_url"] = clicked_url
+        # is_bot is intentionally NOT set here: unlike the unsubscribe view
+        # above (a real request hitting OUR server, where we control
+        # User-Agent/IP directly), a click on a template link goes through
+        # Brevo's own tracking redirect — we never see that original
+        # request, only whatever Brevo forwards afterward, which may not
+        # include a reliable User-Agent/IP for classification at all.
+
     CampaignEvent.objects.create(
         campaign=campaign,
         contact=contact,
         recipient=recipient,
         event_type=internal_event,
         timestamp=timestamp,
-        metadata=payload,
+        metadata=metadata,
         dedupe_key=dedupe_key,
     )
 

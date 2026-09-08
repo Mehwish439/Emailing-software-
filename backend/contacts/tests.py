@@ -100,7 +100,16 @@ class CSVImportTests(ContactTestsBase):
 
 
 class UnsubscribeEndpointTests(APITestCase):
-    """Public one-click unsubscribe endpoint (contacts/unsubscribe.py + the view)."""
+    """
+    Public unsubscribe endpoint (contacts/unsubscribe.py + the view).
+
+    Critical property under test throughout this class: a bare GET (which
+    is exactly what an automated security scanner/link-preview bot does
+    when it prefetches every link in an email BEFORE a human ever opens it)
+    must NEVER change the contact's subscription status. Only an explicit
+    confirmation (the confirmation page's form POST, or a mailbox
+    provider's genuine RFC 8058 one-click POST) may do that.
+    """
 
     def setUp(self):
         self.user = User.objects.create_user(username="owner", email="owner@example.com", password="pass12345!")
@@ -109,12 +118,23 @@ class UnsubscribeEndpointTests(APITestCase):
     def _url(self, token):
         return reverse("unsubscribe", args=[token])
 
-    def test_valid_token_unsubscribes_contact_no_auth_required(self):
+    def test_get_shows_confirmation_page_without_unsubscribing(self):
         from contacts.unsubscribe import generate_unsubscribe_token
 
         token = generate_unsubscribe_token(self.contact.id)
-        # No self.client.force_authenticate — this must work fully anonymously.
         response = self.client.get(self._url(token))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn(b"confirm", response.content.lower())
+        self.contact.refresh_from_db()
+        self.assertEqual(self.contact.status, Contact.Status.ACTIVE)  # untouched by GET
+        self.assertFalse(is_suppressed(self.contact.email))
+
+    def test_confirmation_page_form_post_unsubscribes_contact(self):
+        from contacts.unsubscribe import generate_unsubscribe_token
+
+        token = generate_unsubscribe_token(self.contact.id)
+        # Simulates a human clicking the confirmation page's real button.
+        response = self.client.post(self._url(token) + "?confirm=1")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn(b"unsubscribed", response.content.lower())
         self.contact.refresh_from_db()
@@ -122,11 +142,13 @@ class UnsubscribeEndpointTests(APITestCase):
         self.assertTrue(is_suppressed(self.contact.email))
 
     def test_one_click_post_unsubscribes_without_rendering_page(self):
+        """RFC 8058 List-Unsubscribe-Post — mailbox provider sends a bare POST, no confirm marker."""
         from contacts.unsubscribe import generate_unsubscribe_token
 
         token = generate_unsubscribe_token(self.contact.id)
         response = self.client.post(self._url(token))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.content, b"")  # bare status, no HTML body
         self.contact.refresh_from_db()
         self.assertEqual(self.contact.status, Contact.Status.UNSUBSCRIBED)
 
@@ -137,7 +159,7 @@ class UnsubscribeEndpointTests(APITestCase):
         self.contact.refresh_from_db()
         self.assertEqual(self.contact.status, Contact.Status.ACTIVE)  # untouched
 
-    def test_unsubscribe_updates_campaign_recipient_and_event(self):
+    def test_unsubscribe_updates_campaign_recipient_and_event_on_confirm(self):
         from analytics.models import CampaignEvent
         from campaigns.models import Campaign, CampaignRecipient
         from contacts.unsubscribe import generate_unsubscribe_token
@@ -155,9 +177,15 @@ class UnsubscribeEndpointTests(APITestCase):
         )
 
         token = generate_unsubscribe_token(self.contact.id, campaign.id)
-        response = self.client.get(self._url(token))
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
+        # GET (viewing/scanning) must NOT touch the recipient status yet.
+        self.client.get(self._url(token))
+        recipient.refresh_from_db()
+        self.assertEqual(recipient.status, CampaignRecipient.Status.SENT)
+
+        # Confirming does.
+        response = self.client.post(self._url(token) + "?confirm=1")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         recipient.refresh_from_db()
         self.assertEqual(recipient.status, CampaignRecipient.Status.UNSUBSCRIBED)
         self.assertTrue(
@@ -166,12 +194,72 @@ class UnsubscribeEndpointTests(APITestCase):
             ).exists()
         )
 
-    def test_clicking_twice_is_idempotent(self):
+    def test_get_logs_unsubscribe_viewed_event_distinct_from_confirmed(self):
+        from analytics.models import CampaignEvent
+        from campaigns.models import Campaign
+        from contacts.unsubscribe import generate_unsubscribe_token
+        from email_templates.models import EmailTemplate
+
+        template = EmailTemplate.objects.create(
+            name="T", subject="Hi", html_content="<p>Hi</p>", created_by=self.user
+        )
+        campaign = Campaign.objects.create(
+            name="Camp", subject="Subj", sender_name="Me", sender_email="me@example.com",
+            template=template, created_by=self.user, status=Campaign.Status.SENT,
+        )
+        token = generate_unsubscribe_token(self.contact.id, campaign.id)
+
+        self.client.get(self._url(token))
+
+        self.assertTrue(
+            CampaignEvent.objects.filter(
+                campaign=campaign, contact=self.contact, event_type=CampaignEvent.EventType.UNSUBSCRIBE_VIEWED
+            ).exists()
+        )
+        self.assertFalse(
+            CampaignEvent.objects.filter(
+                campaign=campaign, contact=self.contact, event_type=CampaignEvent.EventType.UNSUBSCRIBED
+            ).exists()
+        )
+
+    def test_bot_like_user_agent_is_flagged_but_still_not_unsubscribed(self):
+        from analytics.models import CampaignEvent
+        from campaigns.models import Campaign
+        from contacts.unsubscribe import generate_unsubscribe_token
+        from email_templates.models import EmailTemplate
+
+        template = EmailTemplate.objects.create(
+            name="T", subject="Hi", html_content="<p>Hi</p>", created_by=self.user
+        )
+        campaign = Campaign.objects.create(
+            name="Camp", subject="Subj", sender_name="Me", sender_email="me@example.com",
+            template=template, created_by=self.user, status=Campaign.Status.SENT,
+        )
+        token = generate_unsubscribe_token(self.contact.id, campaign.id)
+
+        self.client.get(self._url(token), HTTP_USER_AGENT="Mozilla/5.0 (compatible; SafeLinks; +proofpoint)")
+
+        event = CampaignEvent.objects.get(
+            campaign=campaign, contact=self.contact, event_type=CampaignEvent.EventType.UNSUBSCRIBE_VIEWED
+        )
+        self.assertTrue(event.metadata["is_bot"])
+        self.contact.refresh_from_db()
+        self.assertEqual(self.contact.status, Contact.Status.ACTIVE)
+
+    def test_repeated_views_do_not_unsubscribe_repeated_confirms_are_idempotent(self):
         from contacts.unsubscribe import generate_unsubscribe_token
 
         token = generate_unsubscribe_token(self.contact.id)
-        self.client.get(self._url(token))
-        response = self.client.get(self._url(token))  # click the same link again
+
+        # Many GETs (simulating a scanner re-checking the link over hours) — still untouched.
+        for _ in range(5):
+            self.client.get(self._url(token))
+        self.contact.refresh_from_db()
+        self.assertEqual(self.contact.status, Contact.Status.ACTIVE)
+
+        # Confirming twice is safe/idempotent.
+        self.client.post(self._url(token) + "?confirm=1")
+        response = self.client.post(self._url(token) + "?confirm=1")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.contact.refresh_from_db()
         self.assertEqual(self.contact.status, Contact.Status.UNSUBSCRIBED)

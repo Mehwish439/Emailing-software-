@@ -16,6 +16,13 @@ class CampaignEvent(TimeStampedModel):
         BLOCKED = "blocked", "Blocked"
         SPAM = "spam", "Spam complaint"
         UNSUBSCRIBED = "unsubscribed", "Unsubscribed"
+        # A GET on the unsubscribe link (someone/something opened it) —
+        # distinct from UNSUBSCRIBED, which only fires once a human actually
+        # confirms on the confirmation page (or a mailbox provider sends the
+        # explicit RFC 8058 one-click POST). Merely viewing/scanning the
+        # link must never, by itself, change a contact's subscription
+        # status — see contacts/views.py's unsubscribe_via_token.
+        UNSUBSCRIBE_VIEWED = "unsubscribe_viewed", "Unsubscribe link viewed"
 
     campaign = models.ForeignKey(Campaign, on_delete=models.CASCADE, related_name="events")
     contact = models.ForeignKey(Contact, on_delete=models.CASCADE, related_name="campaign_events")

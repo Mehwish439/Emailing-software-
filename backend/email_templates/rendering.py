@@ -18,6 +18,26 @@ from contacts.services import STANDARD_MERGE_FIELDS
 # and displayed exactly as they appeared in the source file.
 MERGE_TAG_PATTERN = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
 
+# Merge-field keys treated as a person's/contact's name for the purpose of
+# a greeting -- their value gets its first letter capitalized (e.g. an
+# imported "mehwish" becomes "Mehwish" in "Hi {{Firstname}}"), since names
+# are very commonly typed in lowercase in spreadsheets. Matched
+# case-insensitively, with underscores/spaces ignored, against the RAW
+# imported column header, so a contact's own "Firstname", "first name", or
+# "FIRST_NAME" column all match. Deliberately NOT applied to every merge
+# field (e.g. "COMPANY WEBSITE", "POSTAL ADDRESS") -- capitalizing a URL or
+# an address/abbreviation would often make it wrong, not nicer.
+_NAME_LIKE_KEYS = {"firstname", "lastname", "fullname", "name"}
+
+
+def _capitalize_first_letter(value):
+    """Uppercases just the first character, leaving the rest untouched --
+    safe for names with internal capitals (McDonald, O'Brien) or
+    abbreviations, unlike str.capitalize() which would lowercase the rest."""
+    if not value:
+        return value
+    return value[0].upper() + value[1:]
+
 
 def get_contact_merge_fields(contact):
     """
@@ -37,6 +57,12 @@ def get_contact_merge_fields(contact):
         # "email" or "First_name" column, that exact original value (and
         # header spelling) is what the template variable resolves to.
         fields.update(attributes)
+
+    for key, value in fields.items():
+        normalized_key = key.replace("_", "").replace(" ", "").lower()
+        if normalized_key in _NAME_LIKE_KEYS and isinstance(value, str):
+            fields[key] = _capitalize_first_letter(value)
+
     return fields
 
 
