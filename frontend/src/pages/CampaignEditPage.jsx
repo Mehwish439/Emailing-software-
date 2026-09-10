@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
+import Modal from "../components/Modal";
 import { useToast } from "../context/ToastContext";
 import { getCampaign, updateCampaign } from "../services/campaignService";
-import { listContactLists } from "../services/contactService";
+import { createContactList, listContactLists } from "../services/contactService";
 import { listTemplates } from "../services/templateService";
 
 export default function CampaignEditPage() {
@@ -15,6 +16,9 @@ export default function CampaignEditPage() {
   const [templates, setTemplates] = useState([]);
   const [lists, setLists] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [newListModalOpen, setNewListModalOpen] = useState(false);
+  const [newListName, setNewListName] = useState("");
+  const [creatingList, setCreatingList] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -43,6 +47,24 @@ export default function CampaignEditPage() {
         ? prev.contact_lists.filter((x) => x !== listId)
         : [...prev.contact_lists, listId],
     }));
+  };
+
+  const handleCreateList = async () => {
+    if (!newListName.trim()) return;
+    setCreatingList(true);
+    try {
+      const created = await createContactList({ name: newListName.trim() });
+      const data = await listContactLists({ page_size: 100 });
+      setLists(data.results || data || []);
+      setForm((prev) => ({ ...prev, contact_lists: [...prev.contact_lists, created.id] }));
+      setNewListName("");
+      setNewListModalOpen(false);
+      showToast("List created.", "success");
+    } catch {
+      showToast("Failed to create list.", "error");
+    } finally {
+      setCreatingList(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -104,7 +126,12 @@ export default function CampaignEditPage() {
           </select>
         </div>
         <div>
-          <label className="label">Contact lists</label>
+          <div className="flex items-center justify-between">
+            <label className="label">Contact lists</label>
+            <button type="button" className="text-xs text-brand-600 hover:underline" onClick={() => setNewListModalOpen(true)}>
+              + New list
+            </button>
+          </div>
           <div className="space-y-2">
             {lists.map((l) => (
               <label key={l.id} className="flex items-center gap-2 text-sm">
@@ -123,6 +150,34 @@ export default function CampaignEditPage() {
           </button>
         </div>
       </form>
+
+      <Modal
+        open={newListModalOpen}
+        onClose={() => setNewListModalOpen(false)}
+        title="Create a new list"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setNewListModalOpen(false)}>
+              Cancel
+            </button>
+            <button className="btn-primary" onClick={handleCreateList} disabled={creatingList || !newListName.trim()}>
+              {creatingList ? "Creating…" : "Create"}
+            </button>
+          </>
+        }
+      >
+        <div>
+          <label className="label">List name</label>
+          <input
+            type="text"
+            className="input"
+            value={newListName}
+            onChange={(e) => setNewListName(e.target.value)}
+            placeholder="e.g. Chicago Travel Agencies"
+            autoFocus
+          />
+        </div>
+      </Modal>
     </div>
   );
 }

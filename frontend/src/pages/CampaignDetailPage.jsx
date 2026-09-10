@@ -101,7 +101,7 @@ export default function CampaignDetailPage() {
   const applyStatusFilter = async (statusValue) => {
     setStatusFilter(statusValue);
     const params = { page: 1, page_size: 50 };
-    if (statusValue) params.status = statusValue;
+    if (statusValue) params.recipient_status = statusValue;
     try {
       const data = await getCampaignRecipients(id, params);
       setRecipients(data.results || []);
@@ -133,7 +133,7 @@ export default function CampaignDetailPage() {
     try {
       const nextPage = recipientsPage + 1;
       const params = { page: nextPage, page_size: 50 };
-      if (statusFilter) params.status = statusFilter;
+      if (statusFilter) params.recipient_status = statusFilter;
       const data = await getCampaignRecipients(id, params);
       setRecipients((prev) => [...prev, ...(data.results || [])]);
       setRecipientsPage(nextPage);

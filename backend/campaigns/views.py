@@ -114,20 +114,29 @@ class CampaignViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"])
     def recipients(self, request, pk=None):
         """
-        GET /api/campaigns/{id}/recipients/?status=delivered
-        GET /api/campaigns/{id}/recipients/?status=delivered,opened,clicked
+        GET /api/campaigns/{id}/recipients/?recipient_status=delivered
+        GET /api/campaigns/{id}/recipients/?recipient_status=delivered,opened,clicked
 
-        Optional ?status= filter (comma-separated for more than one) —
-        matches CampaignRecipient.Status values. Comma-separated support
-        matters for e.g. "Delivered": a recipient who progressed further to
-        "opened"/"clicked" was still delivered, so the frontend's Delivered
-        stat card filters by all three at once rather than missing them.
+        Optional ?recipient_status= filter (comma-separated for more than
+        one) — matches CampaignRecipient.Status values. Named
+        "recipient_status", NOT "status": this ViewSet's own
+        filterset_fields = ["status"] filters CAMPAIGNS by their status
+        (e.g. GET /api/campaigns/?status=sent), and self.get_object() below
+        runs that same filtering automatically — a plain "?status=" here
+        would collide with it and get validated against Campaign's OWN
+        status choices instead of CampaignRecipient's, causing a confusing
+        400 "not one of the available choices" error.
+
+        Comma-separated support matters for e.g. "Delivered": a recipient
+        who progressed further to "opened"/"clicked" was still delivered,
+        so the frontend's Delivered stat card filters by all three at once
+        rather than missing them.
         """
         from .serializers import CampaignRecipientSerializer
 
         campaign = self.get_object()
-        queryset = campaign.recipients.select_related("contact").all()
-        status_filter = request.query_params.get("status")
+        queryset = campaign.recipients.select_related("contact").order_by("id")
+        status_filter = request.query_params.get("recipient_status")
         if status_filter:
             statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
             queryset = queryset.filter(status__in=statuses)

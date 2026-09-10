@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import DateTimeTimezonePicker from "../components/DateTimeTimezonePicker";
+import Modal from "../components/Modal";
 import { useToast } from "../context/ToastContext";
 import { createCampaign, sendCampaignNow, sendTestEmail } from "../services/campaignService";
-import { listContactLists } from "../services/contactService";
+import { createContactList, importContactsCSV, listContactLists } from "../services/contactService";
 import { createSchedule } from "../services/schedulingService";
 import { listTemplates } from "../services/templateService";
 import { localDateTimeInZoneToUTC } from "../utils/timezone";
@@ -24,6 +25,20 @@ export default function CampaignCreatePage() {
   const [step, setStep] = useState(0);
   const [templates, setTemplates] = useState([]);
   const [lists, setLists] = useState([]);
+
+  // Quick "new list" — lets the user create a list without leaving the
+  // campaign wizard to go to the Contacts page first.
+  const [newListModalOpen, setNewListModalOpen] = useState(false);
+  const [newListName, setNewListName] = useState("");
+  const [creatingList, setCreatingList] = useState(false);
+
+  // Quick CSV import — same idea, reusing the same backend endpoint the
+  // Contacts page uses (see services/contactService.js's importContactsCSV).
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [importTargetListIds, setImportTargetListIds] = useState([]);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -55,6 +70,60 @@ export default function CampaignCreatePage() {
         ? prev.contact_lists.filter((x) => x !== id)
         : [...prev.contact_lists, id],
     }));
+  };
+
+  const refreshLists = () => listContactLists({ page_size: 100 }).then((data) => setLists(data.results || data || []));
+
+  const handleCreateList = async () => {
+    if (!newListName.trim()) return;
+    setCreatingList(true);
+    try {
+      const created = await createContactList({ name: newListName.trim() });
+      await refreshLists();
+      // Auto-select the freshly created list so it's ready to import into /
+      // send to right away, without an extra click.
+      setForm((prev) => ({ ...prev, contact_lists: [...prev.contact_lists, created.id] }));
+      setNewListName("");
+      setNewListModalOpen(false);
+      showToast("List created.", "success");
+    } catch {
+      showToast("Failed to create list.", "error");
+    } finally {
+      setCreatingList(false);
+    }
+  };
+
+  const toggleImportTargetList = (id) => {
+    setImportTargetListIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const closeImportModal = () => {
+    setImportModalOpen(false);
+    setImportFile(null);
+    setImportTargetListIds([]);
+    setImportResult(null);
+  };
+
+  const handleImportCsv = async () => {
+    if (!importFile) return;
+    setImporting(true);
+    try {
+      const result = await importContactsCSV(importFile, importTargetListIds);
+      setImportResult(result);
+      await refreshLists();
+      // Whichever list(s) the import was added to should end up selected
+      // for this campaign — that's the whole point of doing this inline.
+      if (importTargetListIds.length) {
+        setForm((prev) => ({
+          ...prev,
+          contact_lists: [...new Set([...prev.contact_lists, ...importTargetListIds])],
+        }));
+      }
+    } catch {
+      showToast("CSV import failed.", "error");
+    } finally {
+      setImporting(false);
+    }
   };
 
   const canProceed = () => {
@@ -158,9 +227,19 @@ export default function CampaignCreatePage() {
 
         {step === 1 && (
           <div className="space-y-3">
-            <p className="text-sm text-slate-600">Select which contact lists should receive this campaign.</p>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-600">Select which contact lists should receive this campaign.</p>
+              <div className="flex gap-2">
+                <button type="button" className="btn-secondary text-xs" onClick={() => setNewListModalOpen(true)}>
+                  + New list
+                </button>
+                <button type="button" className="btn-secondary text-xs" onClick={() => setImportModalOpen(true)}>
+                  Import CSV
+                </button>
+              </div>
+            </div>
             {lists.length === 0 ? (
-              <p className="text-sm text-slate-500">No contact lists found. Create one first from the Contacts page.</p>
+              <p className="text-sm text-slate-500">No contact lists yet — create one or import a CSV above.</p>
             ) : (
               <div className="space-y-2">
                 {lists.map((l) => (
@@ -311,6 +390,90 @@ export default function CampaignCreatePage() {
           </button>
         )}
       </div>
+
+      {/* Quick "new list" modal */}
+      <Modal
+        open={newListModalOpen}
+        onClose={() => setNewListModalOpen(false)}
+        title="Create a new list"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setNewListModalOpen(false)}>
+              Cancel
+            </button>
+            <button className="btn-primary" onClick={handleCreateList} disabled={creatingList || !newListName.trim()}>
+              {creatingList ? "Creating…" : "Create"}
+            </button>
+          </>
+        }
+      >
+        <div>
+          <label className="label">List name</label>
+          <input
+            type="text"
+            className="input"
+            value={newListName}
+            onChange={(e) => setNewListName(e.target.value)}
+            placeholder="e.g. Chicago Travel Agencies"
+            autoFocus
+          />
+        </div>
+      </Modal>
+
+      {/* Quick CSV import modal */}
+      <Modal open={importModalOpen} onClose={closeImportModal} title="Import Contacts from CSV">
+        {!importResult ? (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-500">
+              CSV must include an <span className="font-mono">email</span> column. Any other columns are kept too and
+              become available as template variables.
+            </p>
+            <input type="file" accept=".csv" onChange={(e) => setImportFile(e.target.files[0])} className="input" />
+            {lists.length > 0 && (
+              <div>
+                <label className="label">Add imported contacts to list(s)</label>
+                <div className="space-y-1.5 max-h-32 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                  {lists.map((l) => (
+                    <label key={l.id} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={importTargetListIds.includes(l.id)}
+                        onChange={() => toggleImportTargetList(l.id)}
+                      />
+                      {l.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2 text-sm">
+            <p className="text-emerald-700 font-medium">
+              Imported {importResult.imported} contact{importResult.imported === 1 ? "" : "s"}.
+            </p>
+            {importResult.duplicates > 0 && <p className="text-slate-500">{importResult.duplicates} duplicate(s) skipped.</p>}
+            {importResult.invalid > 0 && <p className="text-amber-600">{importResult.invalid} invalid row(s) skipped.</p>}
+          </div>
+        )}
+        {!importResult && (
+          <div className="flex justify-end gap-2 mt-4">
+            <button className="btn-secondary" onClick={closeImportModal}>
+              Cancel
+            </button>
+            <button className="btn-primary" onClick={handleImportCsv} disabled={importing || !importFile}>
+              {importing ? "Importing…" : "Import"}
+            </button>
+          </div>
+        )}
+        {importResult && (
+          <div className="flex justify-end mt-4">
+            <button className="btn-primary" onClick={closeImportModal}>
+              Done
+            </button>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -323,4 +486,3 @@ function Row({ label, value }) {
     </div>
   );
 }
-
