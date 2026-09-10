@@ -111,10 +111,26 @@ class CampaignViewSet(viewsets.ModelViewSet):
         return Response(compute_campaign_analytics(campaign))
 
     @action(detail=True, methods=["get"])
+    @action(detail=True, methods=["get"])
     def recipients(self, request, pk=None):
+        """
+        GET /api/campaigns/{id}/recipients/?status=delivered
+        GET /api/campaigns/{id}/recipients/?status=delivered,opened,clicked
+
+        Optional ?status= filter (comma-separated for more than one) —
+        matches CampaignRecipient.Status values. Comma-separated support
+        matters for e.g. "Delivered": a recipient who progressed further to
+        "opened"/"clicked" was still delivered, so the frontend's Delivered
+        stat card filters by all three at once rather than missing them.
+        """
         from .serializers import CampaignRecipientSerializer
 
         campaign = self.get_object()
-        page = self.paginate_queryset(campaign.recipients.select_related("contact").all())
+        queryset = campaign.recipients.select_related("contact").all()
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
+            queryset = queryset.filter(status__in=statuses)
+        page = self.paginate_queryset(queryset)
         serializer = CampaignRecipientSerializer(page, many=True)
         return self.get_paginated_response(serializer.data)

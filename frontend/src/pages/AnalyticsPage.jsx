@@ -3,7 +3,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 
 import Spinner from "../components/Spinner";
 import StatCard from "../components/StatCard";
-import { getCampaignAnalytics, getDashboardSummary } from "../services/analyticsService";
+import { downloadAllCampaignsReportPdf, getCampaignAnalytics, getDashboardSummary } from "../services/analyticsService";
 import { listCampaigns } from "../services/campaignService";
 
 export default function AnalyticsPage() {
@@ -12,6 +12,7 @@ export default function AnalyticsPage() {
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [campaignAnalytics, setCampaignAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -22,9 +23,11 @@ export default function AnalyticsPage() {
       ]);
       setSummary(summaryData);
       setCampaigns(campaignsData.results || []);
-      if (campaignsData.results?.length) {
-        setSelectedCampaignId(String(campaignsData.results[0].id));
-      }
+      // Starts on "All campaigns" (empty selection) rather than
+      // auto-picking the first one, since the top stat cards below now
+      // switch between the overall summary and a single campaign's numbers
+      // based on this selection — defaulting to "All" avoids silently
+      // showing just one campaign's numbers as if they were the total.
       setLoading(false);
     })();
   }, []);
@@ -36,6 +39,15 @@ export default function AnalyticsPage() {
     }
     getCampaignAnalytics(selectedCampaignId).then(setCampaignAnalytics);
   }, [selectedCampaignId]);
+
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true);
+    try {
+      await downloadAllCampaignsReportPdf();
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -56,21 +68,45 @@ export default function AnalyticsPage() {
       ]
     : [];
 
+  // The top stat cards show the SELECTED campaign's own numbers once one is
+  // chosen below, instead of always showing the account-wide totals — that
+  // way picking a campaign actually changes what's displayed up top too.
+  const topStats = campaignAnalytics
+    ? {
+        emails_sent: campaignAnalytics.sent,
+        delivered: campaignAnalytics.delivered,
+        opened: campaignAnalytics.opened,
+        clicked: campaignAnalytics.clicked,
+        bounced: campaignAnalytics.soft_bounced + campaignAnalytics.hard_bounced,
+        unsubscribed: campaignAnalytics.unsubscribed,
+        spam_complaints: campaignAnalytics.spam,
+      }
+    : summary;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900">Analytics</h1>
-        <p className="text-sm text-slate-500">Overall performance across all campaigns.</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Analytics</h1>
+          <p className="text-sm text-slate-500">
+            {selectedCampaignId
+              ? `Showing numbers for the selected campaign below.`
+              : "Overall performance across all campaigns."}
+          </p>
+        </div>
+        <button className="btn-secondary text-sm" onClick={handleDownloadPdf} disabled={downloadingPdf}>
+          {downloadingPdf ? "Generating…" : "Download PDF Report (all campaigns)"}
+        </button>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-        <StatCard label="Emails Sent" value={summary?.emails_sent ?? 0} />
-        <StatCard label="Delivered" value={summary?.delivered ?? 0} />
-        <StatCard label="Opened" value={summary?.opened ?? 0} />
-        <StatCard label="Clicked" value={summary?.clicked ?? 0} />
-        <StatCard label="Bounced" value={summary?.bounced ?? 0} />
-        <StatCard label="Unsubscribed" value={summary?.unsubscribed ?? 0} />
-        <StatCard label="Spam Complaints" value={summary?.spam_complaints ?? 0} />
+        <StatCard label="Emails Sent" value={topStats?.emails_sent ?? 0} />
+        <StatCard label="Delivered" value={topStats?.delivered ?? 0} />
+        <StatCard label="Opened" value={topStats?.opened ?? 0} />
+        <StatCard label="Clicked" value={topStats?.clicked ?? 0} />
+        <StatCard label="Bounced" value={topStats?.bounced ?? 0} />
+        <StatCard label="Unsubscribed" value={topStats?.unsubscribed ?? 0} />
+        <StatCard label="Spam Complaints" value={topStats?.spam_complaints ?? 0} />
       </div>
 
       {summary?.emails_sent > 0 && summary?.delivered === 0 && (
@@ -96,6 +132,7 @@ export default function AnalyticsPage() {
               value={selectedCampaignId}
               onChange={(e) => setSelectedCampaignId(e.target.value)}
             >
+              <option value="">All campaigns (totals above)</option>
               {campaigns.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -107,6 +144,10 @@ export default function AnalyticsPage() {
 
         {campaigns.length === 0 ? (
           <p className="text-sm text-slate-500 text-center py-12">No sent campaigns yet.</p>
+        ) : !selectedCampaignId ? (
+          <p className="text-sm text-slate-500 text-center py-12">
+            Select a campaign above to see its detailed chart and rates.
+          </p>
         ) : campaignAnalytics ? (
           <>
             <div className="h-72">

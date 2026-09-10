@@ -1,4 +1,5 @@
 import api from "./api";
+import { downloadBlob, slugify } from "../utils/download";
 
 export async function listCampaigns(params = {}) {
   const { data } = await api.get("/campaigns/", { params });
@@ -52,4 +53,9 @@ export async function getCampaignStatistics(id) {
 export async function getCampaignRecipients(id, params = {}) {
   const { data } = await api.get(`/campaigns/${id}/recipients/`, { params });
   return data;
+}
+
+export async function downloadCampaignReportPdf(id, campaignName) {
+  const response = await api.get(`/analytics/campaigns/${id}/report.pdf`, { responseType: "blob" });
+  downloadBlob(response.data, `${slugify(campaignName)}-report.pdf`);
 }

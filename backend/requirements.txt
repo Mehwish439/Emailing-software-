@@ -9,3 +9,9 @@ dj-database-url==2.3.0
 django-filter==24.3
 gunicorn==23.0.0
 whitenoise==6.9.0
+reportlab==4.2.5
+
+
+
+
+

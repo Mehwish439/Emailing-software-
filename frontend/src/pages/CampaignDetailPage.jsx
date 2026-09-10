@@ -9,7 +9,13 @@ import StatCard from "../components/StatCard";
 import StatusBadge from "../components/StatusBadge";
 import { useToast } from "../context/ToastContext";
 import { getCampaignAnalytics } from "../services/analyticsService";
-import { getCampaign, getCampaignRecipients, sendCampaignNow, sendTestEmail } from "../services/campaignService";
+import {
+  downloadCampaignReportPdf,
+  getCampaign,
+  getCampaignRecipients,
+  sendCampaignNow,
+  sendTestEmail,
+} from "../services/campaignService";
 import { cancelSchedule, createSchedule, listScheduledCampaigns } from "../services/schedulingService";
 import { localDateTimeInZoneToUTC } from "../utils/timezone";
 
@@ -30,6 +36,12 @@ export default function CampaignDetailPage() {
   const [recipientsPage, setRecipientsPage] = useState(1);
   const [recipientsHasMore, setRecipientsHasMore] = useState(false);
   const [loadingMoreRecipients, setLoadingMoreRecipients] = useState(false);
+  // Which stat card is currently "active" as a filter on the recipients
+  // table below — null means "show everyone" (the default). Comma-joined
+  // for stats like Delivered that map to more than one underlying status
+  // (see campaigns/views.py's recipients action).
+  const [statusFilter, setStatusFilter] = useState(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [schedule, setSchedule] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -70,6 +82,7 @@ export default function CampaignDetailPage() {
       setRecipients(recipientsData.results || []);
       setRecipientsPage(1);
       setRecipientsHasMore(Boolean(recipientsData.next));
+      setStatusFilter(null);
 
       if (campaignData.status !== "draft") {
         getCampaignAnalytics(id).then(setAnalytics).catch(() => {});
@@ -85,11 +98,43 @@ export default function CampaignDetailPage() {
     }
   };
 
+  const applyStatusFilter = async (statusValue) => {
+    setStatusFilter(statusValue);
+    const params = { page: 1, page_size: 50 };
+    if (statusValue) params.status = statusValue;
+    try {
+      const data = await getCampaignRecipients(id, params);
+      setRecipients(data.results || []);
+      setRecipientsPage(1);
+      setRecipientsHasMore(Boolean(data.next));
+    } catch {
+      showToast("Failed to filter recipients.", "error");
+    }
+  };
+
+  // Clicking the same stat again clears the filter (shows everyone).
+  const handleStatCardClick = (statusValue) => {
+    applyStatusFilter(statusFilter === statusValue ? null : statusValue);
+  };
+
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true);
+    try {
+      await downloadCampaignReportPdf(id, campaign.name);
+    } catch {
+      showToast("Failed to generate PDF report.", "error");
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
   const loadMoreRecipients = async () => {
     setLoadingMoreRecipients(true);
     try {
       const nextPage = recipientsPage + 1;
-      const data = await getCampaignRecipients(id, { page: nextPage, page_size: 50 });
+      const params = { page: nextPage, page_size: 50 };
+      if (statusFilter) params.status = statusFilter;
+      const data = await getCampaignRecipients(id, params);
       setRecipients((prev) => [...prev, ...(data.results || [])]);
       setRecipientsPage(nextPage);
       setRecipientsHasMore(Boolean(data.next));
@@ -220,14 +265,55 @@ export default function CampaignDetailPage() {
 
       {analytics && (
         <>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-slate-400">Click a stat to filter recipients by it — click again to clear.</p>
+            <button className="btn-secondary text-sm" onClick={handleDownloadPdf} disabled={downloadingPdf}>
+              {downloadingPdf ? "Generating…" : "Download PDF Report"}
+            </button>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            <StatCard label="Sent" value={analytics.sent} />
-            <StatCard label="Delivered" value={analytics.delivered} />
-            <StatCard label="Opened" value={analytics.opened} />
-            <StatCard label="Clicked" value={analytics.clicked} />
-            <StatCard label="Bounced" value={analytics.soft_bounced + analytics.hard_bounced} />
-            <StatCard label="Unsubscribed" value={analytics.unsubscribed} />
-            <StatCard label="Spam Complaints" value={analytics.spam} />
+            <StatCard
+              label="Sent"
+              value={analytics.sent}
+              onClick={() => handleStatCardClick("sent,delivered,opened,clicked,bounced,blocked,unsubscribed,spam,failed")}
+              active={statusFilter === "sent,delivered,opened,clicked,bounced,blocked,unsubscribed,spam,failed"}
+            />
+            <StatCard
+              label="Delivered"
+              value={analytics.delivered}
+              onClick={() => handleStatCardClick("delivered,opened,clicked")}
+              active={statusFilter === "delivered,opened,clicked"}
+            />
+            <StatCard
+              label="Opened"
+              value={analytics.opened}
+              onClick={() => handleStatCardClick("opened,clicked")}
+              active={statusFilter === "opened,clicked"}
+            />
+            <StatCard
+              label="Clicked"
+              value={analytics.clicked}
+              onClick={() => handleStatCardClick("clicked")}
+              active={statusFilter === "clicked"}
+            />
+            <StatCard
+              label="Bounced"
+              value={analytics.soft_bounced + analytics.hard_bounced}
+              onClick={() => handleStatCardClick("bounced")}
+              active={statusFilter === "bounced"}
+            />
+            <StatCard
+              label="Unsubscribed"
+              value={analytics.unsubscribed}
+              onClick={() => handleStatCardClick("unsubscribed")}
+              active={statusFilter === "unsubscribed"}
+            />
+            <StatCard
+              label="Spam Complaints"
+              value={analytics.spam}
+              onClick={() => handleStatCardClick("spam")}
+              active={statusFilter === "spam"}
+            />
             <StatCard label="Delivery Rate" value={`${analytics.delivery_rate}%`} />
           </div>
           {analytics.sent > 0 && analytics.delivered === 0 && (
@@ -247,8 +333,16 @@ export default function CampaignDetailPage() {
       )}
 
       <div className="card">
-        <div className="px-5 py-4 border-b border-slate-200">
-          <h2 className="text-sm font-semibold text-slate-900">Recipients ({campaign.recipient_count})</h2>
+        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-900">
+            Recipients ({recipients.length}{recipientsHasMore ? "+" : ""}
+            {statusFilter ? " matching filter" : ` of ${campaign.recipient_count}`})
+          </h2>
+          {statusFilter && (
+            <button className="text-xs text-brand-600 hover:underline" onClick={() => applyStatusFilter(null)}>
+              Show all
+            </button>
+          )}
         </div>
         {["draft", "scheduled", "processing", "failed"].includes(campaign.status) && (
           <div className={`px-5 py-3 border-b border-slate-100 text-sm ${

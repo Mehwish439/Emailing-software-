@@ -320,3 +320,34 @@ def unsubscribe_via_token(request, token):
     # RFC 8058 one-click unsubscribe via mailbox provider: no page is shown,
     # just a plain success status is expected.
     return Response(status=status.HTTP_200_OK)
+
+
+
+
+if error:
+    if request.query_params.get("confirm"):
+        return _unsubcribe_page("Something went wrong",error,ok=False)
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+is_confirm_page_submission = bool(request.query_params.get("confirm"))
+_perform_unsubscribe(
+    contact, campaign_id, source="unsubscribe_page_confirmed" if is_confirm_page_submission else "one_click_post"
+)
+
+
+if error: 
+    if request.query_params.get("confirm"):
+        return _unsubscribe_page("Something went wrong",error,ok=False)
+    return Response(status=status.HTTP_400_BAD_REQUEST)
+is_confirm_page_submission = bool(request.query_params.get("confirm"))
+_perform_unsubscribe(
+    contact, campaign_id,source="unsubscribe_page_confirmed" i
+)
+
+if error:
+    if request.query_params.get("confirm"):
+        return _unsubscribe_page("something went wrong", error, ok=False)
+    return Response (status=status.HTTP_400_BAD_REQUEST)
+is_confirm_page_submission = bool (request.query_params.get("confirm"))
+_perform_unsubscribe(
+    contact, campaign_id,source="unsubscribe_page_confirmed"i
+)
