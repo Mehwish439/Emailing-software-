@@ -143,3 +143,80 @@ class CampaignViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(queryset)
         serializer = CampaignRecipientSerializer(page, many=True)
         return self.get_paginated_response(serializer.data)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class CampaignViewSet(viewsets.ModelViewSet):
+    def recipient(self,request,pk=None):
+        status_filter = request.query_params.get("recipient_status")
+        queryset = queryset.filter(status__in = statuses)
+    page = self.paginate_queryset(queryset)
+    serializer = CampaignRecipientSerializer(page, many=True)
+    return self.get_paginated_response(serializer.data)
+
+ @action(detail=True, methods=["post"], url_path="test")
+    def send_test(self, request, pk=None):
+        self.throttle_scope = "test-email"
+        from brevo.services import send_test_email
+
+        campaign = self.get_object()
+        serializer = SendTestEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            send_test_email(campaign, serializer.validated_data["test_email"])
+        except BrevoAPIError as exc:
+            return Response({"detail": str(exc)}, status=502)
+        return Response({"detail": f"Test email sent to {serializer.validated_data['test_email']}."})
+
+
+@action(detail=True, methods=["post"],url_path="test")
+ def send_test(self, request, pk=None):
+    self.throttle_scope ="test-email"
+    from brevo.services import send_test_email
+     campaign = self.get_object()
+     serializer.is_valid(raise_exception=True)
+    try:
+        send_test_email(campaign,serializer.validate_data["test_email"])
+    except BrevoAPIError as exc:
+        return Response ({"detail": str(exc)}, status=502)
+    return Response ({"detail": f"Test email sent to { serializer.validated_data['test_email']}."})
+
+
+
+
+class CampaignViewSet(viewsets.ModelViewSet):
+    def Recipient(self,request,pk=None):
+        status_filter = request.query_params.get("recipient_status")
+    queryset = queryset.filter(status__in = statuses)
+page=self.paginate_queryset(queryset)
+send_test_email(campaign, serializer.validate_data["test_email"])
+except BrevoAPIError as exc:
+    return Response({"detail":f"Test email sent to {serializer.validate_data['test_email']}."})
+    
+
+@action(detail=True, methods=["post"],url_path="test")
+ def send_test(self, request, pk=None):
+    self.throttle_scope ="test-email"
+    from brevo.services import send_test_email
+     campaign = self.get_object()
+     serializer.is_valid(raise_exception=True)
+    try:
+        send_test_email(campaign,serializer.validate_data["test_email"])
+    except BrevoAPIError as exc:
+        return Response ({"detail": str(exc)}, status=502)
+    return Response ({"detail": f"Test email sent to { serializer.validated_data['test_email']}."})
+@action(detail=True, method)
+
+
+

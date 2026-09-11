@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import ConfirmDialog from "../components/ConfirmDialog";
 import EmptyState from "../components/EmptyState";
@@ -23,6 +23,10 @@ const emptyForm = { first_name: "", last_name: "", email: "", phone: "", status:
 
 export default function ContactsPage() {
   const { showToast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Set when arriving via a list's "View contacts" link (ContactListsPage) —
+  // e.g. /contacts?list=3 — filters the table to just that list's members.
+  const listFilterId = searchParams.get("list") || "";
   const [contacts, setContacts] = useState([]);
   const [lists, setLists] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -57,7 +61,12 @@ export default function ContactsPage() {
   const loadContacts = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { page, search: search || undefined, status: statusFilter || undefined };
+      const params = {
+        page,
+        search: search || undefined,
+        status: statusFilter || undefined,
+        lists: listFilterId || undefined,
+      };
       const data = await listContacts(params);
       setContacts(data.results || []);
       setNumPages(data.num_pages || 1);
@@ -66,7 +75,7 @@ export default function ContactsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, showToast]);
+  }, [page, search, statusFilter, listFilterId, showToast]);
 
   useEffect(() => {
     loadContacts();
@@ -190,12 +199,35 @@ export default function ContactsPage() {
     setImportResult(null);
   };
 
+  const listFilterName = listFilterId ? lists.find((l) => String(l.id) === String(listFilterId))?.name : "";
+
+  useEffect(() => {
+    setPage(1);
+  }, [listFilterId]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Contacts</h1>
-          <p className="text-sm text-slate-500">Manage your subscriber base.</p>
+          <p className="text-sm text-slate-500">
+            {listFilterId ? (
+              <>
+                Viewing list: <span className="font-medium text-slate-700">{listFilterName || `#${listFilterId}`}</span>{" "}
+                <button
+                  className="text-brand-600 hover:underline"
+                  onClick={() => {
+                    setPage(1);
+                    setSearchParams({});
+                  }}
+                >
+                  (clear filter)
+                </button>
+              </>
+            ) : (
+              "Manage your subscriber base."
+            )}
+          </p>
         </div>
         <div className="flex gap-2">
           <button className="btn-secondary" onClick={() => setImportOpen(true)}>

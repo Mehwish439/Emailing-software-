@@ -122,6 +122,9 @@ export default function ContactListsPage() {
                 </div>
                 <div className="flex items-center gap-4">
                   <span className="badge bg-brand-50 text-brand-700">{l.contact_count} contacts</span>
+                  <Link className="text-sm text-brand-600 hover:underline" to={`/contacts?list=${l.id}`}>
+                    View contacts
+                  </Link>
                   <button className="text-sm text-brand-600 hover:underline" onClick={() => openEditForm(l)}>
                     Edit
                   </button>
