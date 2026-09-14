@@ -67,3 +67,46 @@ export async function updateContactList(id, payload) {
 export async function deleteContactList(id) {
   await api.delete(`/contact-lists/${id}/`);
 }
+
+export async function listTags(params = {}) {
+  const { data } = await api.get("/tags/", { params });
+  return data;
+}
+
+export async function createTag(payload) {
+  const { data } = await api.post("/tags/", payload);
+  return data;
+}
+
+export async function updateTag(id, payload) {
+  const { data } = await api.patch(`/tags/${id}/`, payload);
+  return data;
+}
+
+export async function deleteTag(id) {
+  await api.delete(`/tags/${id}/`);
+}
+
+export async function listSegments(params = {}) {
+  const { data } = await api.get("/segments/", { params });
+  return data;
+}
+
+export async function createSegment(payload) {
+  const { data } = await api.post("/segments/", payload);
+  return data;
+}
+
+export async function updateSegment(id, payload) {
+  const { data } = await api.patch(`/segments/${id}/`, payload);
+  return data;
+}
+
+export async function deleteSegment(id) {
+  await api.delete(`/segments/${id}/`);
+}
+
+export async function getSegmentContacts(id, params = {}) {
+  const { data } = await api.get(`/segments/${id}/contacts/`, { params });
+  return data;
+}

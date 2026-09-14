@@ -12,6 +12,8 @@ const NAV_SECTIONS = [
     items: [
       { label: "All Contacts", to: "/contacts", icon: "users" },
       { label: "Lists", to: "/contacts/lists", icon: "list" },
+      { label: "Tags", to: "/contacts/tags", icon: "tag" },
+      { label: "Segments", to: "/contacts/segments", icon: "filter" },
     ],
   },
   {
@@ -39,6 +41,12 @@ const ICONS = {
   ),
   list: (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 6h16M4 12h16M4 18h7" />
+  ),
+  tag: (
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 7h.01M3 11V6a2 2 0 012-2h5.5a2 2 0 011.414.586l7 7a2 2 0 010 2.828l-5.5 5.5a2 2 0 01-2.828 0l-7-7A2 2 0 013 11z" />
+  ),
+  filter: (
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 4h18l-7 9v6l-4 2v-8L3 4z" />
   ),
   send: (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />

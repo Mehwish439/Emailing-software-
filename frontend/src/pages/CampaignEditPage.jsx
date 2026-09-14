@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import Modal from "../components/Modal";
 import { useToast } from "../context/ToastContext";
 import { getCampaign, updateCampaign } from "../services/campaignService";
-import { createContactList, listContactLists } from "../services/contactService";
+import { createContactList, listContactLists, listSegments } from "../services/contactService";
 import { listTemplates } from "../services/templateService";
 
 export default function CampaignEditPage() {
@@ -15,6 +15,7 @@ export default function CampaignEditPage() {
   const [form, setForm] = useState(null);
   const [templates, setTemplates] = useState([]);
   const [lists, setLists] = useState([]);
+  const [segments, setSegments] = useState([]);
   const [saving, setSaving] = useState(false);
   const [newListModalOpen, setNewListModalOpen] = useState(false);
   const [newListName, setNewListName] = useState("");
@@ -22,10 +23,11 @@ export default function CampaignEditPage() {
 
   useEffect(() => {
     (async () => {
-      const [campaign, templatesData, listsData] = await Promise.all([
+      const [campaign, templatesData, listsData, segmentsData] = await Promise.all([
         getCampaign(id),
         listTemplates({ page_size: 100 }),
         listContactLists({ page_size: 100 }),
+        listSegments({ page_size: 100 }),
       ]);
       setForm({
         name: campaign.name,
@@ -34,9 +36,11 @@ export default function CampaignEditPage() {
         sender_email: campaign.sender_email,
         template: campaign.template,
         contact_lists: campaign.contact_lists,
+        segments: campaign.segments || [],
       });
       setTemplates(templatesData.results || []);
       setLists(listsData.results || listsData || []);
+      setSegments(segmentsData.results || segmentsData || []);
     })();
   }, [id]);
 
@@ -46,6 +50,13 @@ export default function CampaignEditPage() {
       contact_lists: prev.contact_lists.includes(listId)
         ? prev.contact_lists.filter((x) => x !== listId)
         : [...prev.contact_lists, listId],
+    }));
+  };
+
+  const toggleSegment = (segmentId) => {
+    setForm((prev) => ({
+      ...prev,
+      segments: prev.segments.includes(segmentId) ? prev.segments.filter((x) => x !== segmentId) : [...prev.segments, segmentId],
     }));
   };
 
@@ -141,6 +152,19 @@ export default function CampaignEditPage() {
             ))}
           </div>
         </div>
+        {segments.length > 0 && (
+          <div>
+            <label className="label">Segments</label>
+            <div className="space-y-2">
+              {segments.map((s) => (
+                <label key={s.id} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={form.segments.includes(s.id)} onChange={() => toggleSegment(s.id)} />
+                  {s.name} <span className="text-slate-400">({s.contact_count})</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-secondary" onClick={() => navigate(-1)}>
             Cancel

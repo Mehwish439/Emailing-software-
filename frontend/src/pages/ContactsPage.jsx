@@ -16,19 +16,23 @@ import {
   importContactsCSV,
   listContactLists,
   listContacts,
+  listTags,
   updateContact,
 } from "../services/contactService";
 
-const emptyForm = { first_name: "", last_name: "", email: "", phone: "", status: "active", lists: [] };
+const emptyForm = { first_name: "", last_name: "", email: "", phone: "", status: "active", lists: [], tags: [] };
 
 export default function ContactsPage() {
   const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
-  // Set when arriving via a list's "View contacts" link (ContactListsPage) —
-  // e.g. /contacts?list=3 — filters the table to just that list's members.
+  // Set when arriving via a list's or tag's "View contacts" link
+  // (ContactListsPage / TagsPage) — e.g. /contacts?list=3 or /contacts?tags=5
+  // — filters the table to just that list's/tag's members.
   const listFilterId = searchParams.get("list") || "";
+  const tagFilterId = searchParams.get("tags") || "";
   const [contacts, setContacts] = useState([]);
   const [lists, setLists] = useState([]);
+  const [tags, setTags] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -58,6 +62,11 @@ export default function ContactsPage() {
     setLists(data.results || data || []);
   }, []);
 
+  const loadTags = useCallback(async () => {
+    const data = await listTags({ page_size: 100 });
+    setTags(data.results || data || []);
+  }, []);
+
   const loadContacts = useCallback(async () => {
     setLoading(true);
     try {
@@ -66,6 +75,7 @@ export default function ContactsPage() {
         search: search || undefined,
         status: statusFilter || undefined,
         lists: listFilterId || undefined,
+        tags: tagFilterId || undefined,
       };
       const data = await listContacts(params);
       setContacts(data.results || []);
@@ -75,7 +85,7 @@ export default function ContactsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, listFilterId, showToast]);
+  }, [page, search, statusFilter, listFilterId, tagFilterId, showToast]);
 
   useEffect(() => {
     loadContacts();
@@ -84,6 +94,10 @@ export default function ContactsPage() {
   useEffect(() => {
     loadLists();
   }, [loadLists]);
+
+  useEffect(() => {
+    loadTags();
+  }, [loadTags]);
 
   const openCreateForm = () => {
     setEditingContact(null);
@@ -100,6 +114,7 @@ export default function ContactsPage() {
       phone: contact.phone,
       status: contact.status,
       lists: contact.lists || [],
+      tags: contact.tags || [],
     });
     setFormOpen(true);
   };
@@ -108,6 +123,13 @@ export default function ContactsPage() {
     setForm((prev) => ({
       ...prev,
       lists: prev.lists.includes(listId) ? prev.lists.filter((x) => x !== listId) : [...prev.lists, listId],
+    }));
+  };
+
+  const toggleFormTag = (tagId) => {
+    setForm((prev) => ({
+      ...prev,
+      tags: prev.tags.includes(tagId) ? prev.tags.filter((x) => x !== tagId) : [...prev.tags, tagId],
     }));
   };
 
@@ -200,10 +222,12 @@ export default function ContactsPage() {
   };
 
   const listFilterName = listFilterId ? lists.find((l) => String(l.id) === String(listFilterId))?.name : "";
+  const tagFilterName = tagFilterId ? tags.find((t) => String(t.id) === String(tagFilterId))?.name : "";
+  const activeFilterLabel = listFilterId ? `list: ${listFilterName || `#${listFilterId}`}` : tagFilterId ? `tag: ${tagFilterName || `#${tagFilterId}`}` : "";
 
   useEffect(() => {
     setPage(1);
-  }, [listFilterId]);
+  }, [listFilterId, tagFilterId]);
 
   return (
     <div className="space-y-6">
@@ -211,9 +235,9 @@ export default function ContactsPage() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Contacts</h1>
           <p className="text-sm text-slate-500">
-            {listFilterId ? (
+            {activeFilterLabel ? (
               <>
-                Viewing list: <span className="font-medium text-slate-700">{listFilterName || `#${listFilterId}`}</span>{" "}
+                Viewing {activeFilterLabel}.{" "}
                 <button
                   className="text-brand-600 hover:underline"
                   onClick={() => {
@@ -428,6 +452,27 @@ export default function ContactsPage() {
                   <label key={l.id} className="flex items-center gap-2 text-sm">
                     <input type="checkbox" checked={form.lists.includes(l.id)} onChange={() => toggleFormList(l.id)} />
                     {l.name}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="label">Tags</label>
+            {tags.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                No tags yet. Create one from the{" "}
+                <Link to="/contacts/tags" className="text-brand-600 hover:underline">
+                  Tags page
+                </Link>{" "}
+                first.
+              </p>
+            ) : (
+              <div className="space-y-1.5 max-h-32 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                {tags.map((t) => (
+                  <label key={t.id} className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={form.tags.includes(t.id)} onChange={() => toggleFormTag(t.id)} />
+                    {t.name}
                   </label>
                 ))}
               </div>

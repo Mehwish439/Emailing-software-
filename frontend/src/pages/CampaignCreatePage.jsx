@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import DateTimeTimezonePicker from "../components/DateTimeTimezonePicker";
 import Modal from "../components/Modal";
 import { useToast } from "../context/ToastContext";
 import { createCampaign, sendCampaignNow, sendTestEmail } from "../services/campaignService";
-import { createContactList, importContactsCSV, listContactLists } from "../services/contactService";
+import { createContactList, importContactsCSV, listContactLists, listSegments } from "../services/contactService";
 import { createSchedule } from "../services/schedulingService";
 import { listTemplates } from "../services/templateService";
 import { localDateTimeInZoneToUTC } from "../utils/timezone";
@@ -47,7 +47,10 @@ export default function CampaignCreatePage() {
     sender_email: "",
     template: "",
     contact_lists: [],
+    segments: [],
   });
+
+  const [segments, setSegments] = useState([]);
 
   const [sendChoice, setSendChoice] = useState("now"); // "now" | "schedule"
   const [scheduleValue, setScheduleValue] = useState({ date: defaultDate(), time: "10:00", timezone: "Asia/Karachi" });
@@ -57,11 +60,15 @@ export default function CampaignCreatePage() {
   useEffect(() => {
     listTemplates({ page_size: 100 }).then((data) => setTemplates(data.results || []));
     listContactLists({ page_size: 100 }).then((data) => setLists(data.results || data || []));
+    listSegments({ page_size: 100 }).then((data) => setSegments(data.results || data || []));
   }, []);
 
   const selectedTemplate = templates.find((t) => String(t.id) === String(form.template));
   const selectedLists = lists.filter((l) => form.contact_lists.includes(l.id));
-  const totalRecipients = selectedLists.reduce((sum, l) => sum + (l.contact_count || 0), 0);
+  const selectedSegments = segments.filter((s) => form.segments.includes(s.id));
+  const totalRecipients =
+    selectedLists.reduce((sum, l) => sum + (l.contact_count || 0), 0) +
+    selectedSegments.reduce((sum, s) => sum + (s.contact_count || 0), 0);
 
   const toggleList = (id) => {
     setForm((prev) => ({
@@ -69,6 +76,13 @@ export default function CampaignCreatePage() {
       contact_lists: prev.contact_lists.includes(id)
         ? prev.contact_lists.filter((x) => x !== id)
         : [...prev.contact_lists, id],
+    }));
+  };
+
+  const toggleSegment = (id) => {
+    setForm((prev) => ({
+      ...prev,
+      segments: prev.segments.includes(id) ? prev.segments.filter((x) => x !== id) : [...prev.segments, id],
     }));
   };
 
@@ -128,7 +142,7 @@ export default function CampaignCreatePage() {
 
   const canProceed = () => {
     if (step === 0) return form.name && form.subject && form.sender_name && form.sender_email;
-    if (step === 1) return form.contact_lists.length > 0;
+    if (step === 1) return form.contact_lists.length > 0 || form.segments.length > 0;
     if (step === 2) return !!form.template;
     return true;
   };
@@ -255,6 +269,28 @@ export default function CampaignCreatePage() {
                   </label>
                 ))}
               </div>
+            )}
+            {segments.length > 0 && (
+              <>
+                <p className="text-sm text-slate-600 pt-2">
+                  Or target a dynamic <Link to="/contacts/segments" className="text-brand-600 hover:underline">segment</Link> — its
+                  membership updates automatically as contacts' tags/status change.
+                </p>
+                <div className="space-y-2">
+                  {segments.map((s) => (
+                    <label
+                      key={s.id}
+                      className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3 cursor-pointer hover:bg-slate-50"
+                    >
+                      <div className="flex items-center gap-3">
+                        <input type="checkbox" checked={form.segments.includes(s.id)} onChange={() => toggleSegment(s.id)} />
+                        <span className="text-sm font-medium text-slate-900">{s.name}</span>
+                      </div>
+                      <span className="text-xs text-slate-500">{s.contact_count} contacts</span>
+                    </label>
+                  ))}
+                </div>
+              </>
             )}
             {totalRecipients > 0 && (
               <p className="text-sm text-slate-600">
