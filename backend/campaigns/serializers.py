@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from contacts.models import ContactList
+from contacts.models import ContactList, Segment
 from email_templates.models import EmailTemplate
 
 from .models import Campaign, CampaignRecipient
@@ -20,12 +20,13 @@ class CampaignSerializer(serializers.ModelSerializer):
     recipient_count = serializers.IntegerField(read_only=True)
     template_name = serializers.CharField(source="template.name", read_only=True)
     eligible_recipient_count = serializers.SerializerMethodField()
+    segments = serializers.PrimaryKeyRelatedField(many=True, queryset=Segment.objects.none(), required=False)
 
     class Meta:
         model = Campaign
         fields = [
             "id", "name", "subject", "sender_name", "sender_email", "template", "template_name",
-            "contact_lists", "status", "brevo_campaign_id", "recipient_count", "eligible_recipient_count",
+            "contact_lists", "segments", "status", "brevo_campaign_id", "recipient_count", "eligible_recipient_count",
             "created_by", "created_at", "updated_at", "sent_at", "failure_reason",
         ]
         read_only_fields = ["id", "status", "brevo_campaign_id", "created_by", "created_at", "updated_at", "sent_at", "failure_reason"]
@@ -33,13 +34,14 @@ class CampaignSerializer(serializers.ModelSerializer):
     def get_eligible_recipient_count(self, obj):
         """
         A live preview of how many contacts would actually be sent to right
-        now — computed from the campaign's selected lists, filtered to active
-        and non-suppressed contacts — the same logic send_campaign_now() uses
-        to build the real recipient snapshot. Unlike recipient_count (which
-        only reflects CampaignRecipient rows that already exist, i.e. only
-        after a send has been attempted), this updates live as contact_lists
-        changes, so it's what to check *before* sending to confirm the list
-        selection actually has eligible contacts in it.
+        now — computed from the campaign's selected lists AND segments,
+        filtered to active and non-suppressed contacts — the same logic
+        send_campaign_now() uses to build the real recipient snapshot.
+        Unlike recipient_count (which only reflects CampaignRecipient rows
+        that already exist, i.e. only after a send has been attempted),
+        this updates live as contact_lists/segments change, so it's what to
+        check *before* sending to confirm the audience selection actually
+        has eligible contacts in it.
         """
         if not obj.pk:
             return 0
@@ -51,6 +53,7 @@ class CampaignSerializer(serializers.ModelSerializer):
         if request and request.user and request.user.is_authenticated:
             self.fields["template"].queryset = EmailTemplate.objects.filter(created_by=request.user)
             self.fields["contact_lists"].queryset = ContactList.objects.filter(owner=request.user)
+            self.fields["segments"].queryset = Segment.objects.filter(owner=request.user)
 
     def validate(self, attrs):
         # On update, only draft campaigns may be freely edited.

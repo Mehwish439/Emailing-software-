@@ -21,6 +21,7 @@ class Campaign(TimeStampedModel):
     sender_email = models.EmailField()
     template = models.ForeignKey(EmailTemplate, on_delete=models.PROTECT, related_name="campaigns")
     contact_lists = models.ManyToManyField(ContactList, related_name="campaigns", blank=True)
+    segments = models.ManyToManyField("contacts.Segment", related_name="campaigns", blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="campaigns")
     brevo_campaign_id = models.CharField(max_length=100, blank=True, null=True)
@@ -38,12 +39,33 @@ class Campaign(TimeStampedModel):
         return self.recipients.count()
 
     def eligible_contacts_queryset(self):
-        """Contacts from the campaign's selected lists that are not suppressed."""
+        """
+        Active, non-suppressed contacts from EITHER the campaign's selected
+        static lists OR its selected dynamic segments (see contacts.models.
+        Segment) — a contact only needs to match one of the two audience
+        sources, not both, to be included.
+        """
+        from django.db.models import Q
+
         from contacts.models import Contact as ContactModel  # local import avoids circulars
         from contacts.services_suppression import filter_out_suppressed
 
+        list_ids = list(self.contact_lists.values_list("id", flat=True))
+        segment_contact_ids = set()
+        for segment in self.segments.all():
+            segment_contact_ids.update(segment.matching_contacts_queryset().values_list("id", flat=True))
+
+        if not list_ids and not segment_contact_ids:
+            return ContactModel.objects.none()
+
+        audience_filter = Q()
+        if list_ids:
+            audience_filter |= Q(lists__id__in=list_ids)
+        if segment_contact_ids:
+            audience_filter |= Q(id__in=segment_contact_ids)
+
         contact_ids = ContactModel.objects.filter(
-            lists__in=self.contact_lists.all(), status=ContactModel.Status.ACTIVE
+            audience_filter, status=ContactModel.Status.ACTIVE
         ).distinct()
         return filter_out_suppressed(contact_ids)
 

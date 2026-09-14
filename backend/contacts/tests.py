@@ -6,7 +6,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Contact, ContactList
+from .models import Contact, ContactList, Segment, Tag
 from .services_suppression import is_suppressed
 
 User = get_user_model()
@@ -263,3 +263,73 @@ class UnsubscribeEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.contact.refresh_from_db()
         self.assertEqual(self.contact.status, Contact.Status.UNSUBSCRIBED)
+
+class TagAndSegmentTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="segowner", email="segowner@example.com", password="pass12345!")
+        self.client.force_authenticate(user=self.user)
+        self.vip = Tag.objects.create(owner=self.user, name="VIP")
+        self.cold = Tag.objects.create(owner=self.user, name="cold-lead")
+        self.alice = Contact.objects.create(owner=self.user, email="alice@example.com", status=Contact.Status.ACTIVE)
+        self.alice.tags.add(self.vip)
+        self.bob = Contact.objects.create(owner=self.user, email="bob@example.com", status=Contact.Status.ACTIVE)
+        self.bob.tags.add(self.cold)
+        self.carol = Contact.objects.create(owner=self.user, email="carol@example.com", status=Contact.Status.ACTIVE)
+        self.carol.tags.add(self.vip, self.cold)
+
+    def test_create_tag_via_api(self):
+        response = self.client.post(reverse("tag-list"), {"name": "Newsletter"})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(Tag.objects.filter(owner=self.user, name="Newsletter").exists())
+
+    def test_tag_is_scoped_to_owner(self):
+        other = User.objects.create_user(username="other2", email="other2@example.com", password="pass12345!")
+        Tag.objects.create(owner=other, name="NotMine")
+        response = self.client.get(reverse("tag-list"))
+        names = [t["name"] for t in response.data["results"]] if "results" in response.data else [t["name"] for t in response.data]
+        self.assertNotIn("NotMine", names)
+
+    def test_filter_contacts_by_tag(self):
+        response = self.client.get(reverse("contact-list"), {"tags": self.vip.id})
+        emails = {c["email"] for c in response.data["results"]}
+        self.assertEqual(emails, {"alice@example.com", "carol@example.com"})
+
+    def test_segment_any_tag_match(self):
+        segment = Segment.objects.create(owner=self.user, name="Any VIP or Cold", tag_match=Segment.TagMatch.ANY)
+        segment.tags.add(self.vip, self.cold)
+        matches = {c.email for c in segment.matching_contacts_queryset()}
+        self.assertEqual(matches, {"alice@example.com", "bob@example.com", "carol@example.com"})
+
+    def test_segment_all_tags_match(self):
+        segment = Segment.objects.create(owner=self.user, name="Must have both", tag_match=Segment.TagMatch.ALL)
+        segment.tags.add(self.vip, self.cold)
+        matches = {c.email for c in segment.matching_contacts_queryset()}
+        self.assertEqual(matches, {"carol@example.com"})
+
+    def test_segment_excludes_non_matching_status(self):
+        self.alice.status = Contact.Status.UNSUBSCRIBED
+        self.alice.save()
+        segment = Segment.objects.create(owner=self.user, name="Active VIPs", status=Contact.Status.ACTIVE)
+        segment.tags.add(self.vip)
+        matches = {c.email for c in segment.matching_contacts_queryset()}
+        self.assertEqual(matches, {"carol@example.com"})  # alice excluded: no longer active
+
+    def test_segment_contact_count_updates_live(self):
+        segment = Segment.objects.create(owner=self.user, name="VIPs")
+        segment.tags.add(self.vip)
+        self.assertEqual(segment.contact_count, 2)  # alice, carol
+        dave = Contact.objects.create(owner=self.user, email="dave@example.com", status=Contact.Status.ACTIVE)
+        dave.tags.add(self.vip)
+        self.assertEqual(segment.contact_count, 3)  # updates automatically, no stored membership to refresh
+
+    def test_segment_requires_at_least_one_criterion(self):
+        response = self.client.post(reverse("segment-list"), {"name": "Empty segment"})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_segment_contacts_preview_endpoint(self):
+        segment = Segment.objects.create(owner=self.user, name="VIPs")
+        segment.tags.add(self.vip)
+        response = self.client.get(reverse("segment-contacts", args=[segment.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        emails = {c["email"] for c in response.data["results"]}
+        self.assertEqual(emails, {"alice@example.com", "carol@example.com"})
