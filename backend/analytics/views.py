@@ -3,9 +3,11 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from campaigns.models import Campaign
+from campaigns.models import Campaign, CampaignRecipient
+from common.pagination import StandardResultsPagination
 
 from .pdf_reports import build_all_campaigns_report_pdf, build_campaign_report_pdf
+from .serializers import AllCampaignsRecipientSerializer
 from .services import compute_campaign_analytics, compute_campaign_link_breakdown, compute_dashboard_summary
 
 
@@ -14,6 +16,49 @@ from .services import compute_campaign_analytics, compute_campaign_link_breakdow
 def dashboard_summary(request):
     """GET /api/analytics/dashboard/"""
     return Response(compute_dashboard_summary(request.user))
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def all_recipients(request):
+    """
+    GET /api/analytics/recipients/?status=delivered,opened,clicked&page=&page_size=
+
+    Cross-campaign recipients list for the logged-in user, backing the
+    Dashboard's and Analytics's stat cards: clicking "Delivered" there
+    (unlike a single campaign's own detail page) needs to show matching
+    recipients across ALL of the user's campaigns, so this is its own
+    endpoint rather than reusing CampaignViewSet.recipients (which is
+    scoped to one campaign via the URL).
+
+    Optional ?status= filter (comma-separated for more than one) — matches
+    CampaignRecipient.Status values, same comma-separated convention as
+    campaigns/{id}/recipients/'s ?recipient_status=.
+
+    Optional ?campaign= restricts to one campaign. The Analytics page uses
+    this when a specific campaign is selected there, so its stat cards can
+    still drill down through this same endpoint/pattern instead of the
+    other one pulling in every other campaign's recipients too.
+    """
+    queryset = (
+        CampaignRecipient.objects.filter(campaign__created_by=request.user)
+        .select_related("contact", "campaign")
+        .order_by("-sent_at", "-id")
+    )
+
+    status_filter = request.query_params.get("status")
+    if status_filter:
+        statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
+        queryset = queryset.filter(status__in=statuses)
+
+    campaign_id = request.query_params.get("campaign")
+    if campaign_id:
+        queryset = queryset.filter(campaign_id=campaign_id)
+
+    paginator = StandardResultsPagination()
+    page = paginator.paginate_queryset(queryset, request)
+    serializer = AllCampaignsRecipientSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
 
 
 @api_view(["GET"])

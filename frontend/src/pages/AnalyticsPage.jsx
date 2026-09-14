@@ -1,18 +1,37 @@
 import { useEffect, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import RecipientsPanel from "../components/RecipientsPanel";
 import Spinner from "../components/Spinner";
 import StatCard from "../components/StatCard";
-import { downloadAllCampaignsReportPdf, getCampaignAnalytics, getDashboardSummary } from "../services/analyticsService";
-import { listCampaigns } from "../services/campaignService";
+import { useToast } from "../context/ToastContext";
+import { downloadAllCampaignsReportPdf, getAllRecipients, getCampaignAnalytics, getDashboardSummary } from "../services/analyticsService";
+import { getCampaignRecipients, listCampaigns } from "../services/campaignService";
+import { RECIPIENT_STATUS_FILTERS } from "../utils/recipientStatusFilters";
 
 export default function AnalyticsPage() {
+  const { showToast } = useToast();
+
   const [summary, setSummary] = useState(null);
   const [campaigns, setCampaigns] = useState([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [campaignAnalytics, setCampaignAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+
+  // Clicking a stat card below filters the recipients panel to just that
+  // status. When a single campaign is selected (selectedCampaignId), this
+  // filters that campaign's own recipients (via campaignService); when
+  // "All campaigns" is selected, it filters recipients across every
+  // campaign (via analyticsService.getAllRecipients). null means no card
+  // is active / the panel is hidden.
+  const [statusFilter, setStatusFilter] = useState(null);
+  const [recipients, setRecipients] = useState([]);
+  const [recipientsPage, setRecipientsPage] = useState(1);
+  const [recipientsTotal, setRecipientsTotal] = useState(null);
+  const [recipientsHasMore, setRecipientsHasMore] = useState(false);
+  const [loadingRecipients, setLoadingRecipients] = useState(false);
+  const [loadingMoreRecipients, setLoadingMoreRecipients] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -33,12 +52,66 @@ export default function AnalyticsPage() {
   }, []);
 
   useEffect(() => {
+    // Switching which campaign is selected changes what the stat cards
+    // (and therefore the status filter values) mean, so any recipients
+    // filter from before the switch no longer applies — clear it rather
+    // than leave a stale/mismatched list on screen.
+    setStatusFilter(null);
+    setRecipients([]);
+    setRecipientsHasMore(false);
+    setRecipientsTotal(null);
     if (!selectedCampaignId) {
       setCampaignAnalytics(null);
       return;
     }
     getCampaignAnalytics(selectedCampaignId).then(setCampaignAnalytics);
   }, [selectedCampaignId]);
+
+  const applyStatusFilter = async (value) => {
+    setStatusFilter(value);
+    if (!value) {
+      setRecipients([]);
+      setRecipientsHasMore(false);
+      setRecipientsTotal(null);
+      return;
+    }
+    setLoadingRecipients(true);
+    try {
+      const data = selectedCampaignId
+        ? await getCampaignRecipients(selectedCampaignId, { recipient_status: value, page: 1, page_size: 50 })
+        : await getAllRecipients({ status: value, page: 1, page_size: 50 });
+      setRecipients(data.results || []);
+      setRecipientsPage(1);
+      setRecipientsHasMore(Boolean(data.next));
+      setRecipientsTotal(data.count ?? null);
+    } catch {
+      showToast("Failed to load recipients.", "error");
+    } finally {
+      setLoadingRecipients(false);
+    }
+  };
+
+  // Clicking the same stat again clears the filter (hides the panel).
+  const handleStatCardClick = (value) => {
+    applyStatusFilter(statusFilter === value ? null : value);
+  };
+
+  const loadMoreRecipients = async () => {
+    setLoadingMoreRecipients(true);
+    try {
+      const nextPage = recipientsPage + 1;
+      const data = selectedCampaignId
+        ? await getCampaignRecipients(selectedCampaignId, { recipient_status: statusFilter, page: nextPage, page_size: 50 })
+        : await getAllRecipients({ status: statusFilter, page: nextPage, page_size: 50 });
+      setRecipients((prev) => [...prev, ...(data.results || [])]);
+      setRecipientsPage(nextPage);
+      setRecipientsHasMore(Boolean(data.next));
+    } catch {
+      showToast("Failed to load more recipients.", "error");
+    } finally {
+      setLoadingMoreRecipients(false);
+    }
+  };
 
   const handleDownloadPdf = async () => {
     setDownloadingPdf(true);
@@ -83,6 +156,16 @@ export default function AnalyticsPage() {
       }
     : summary;
 
+  const STAT_CARDS = [
+    { label: "Emails Sent", value: topStats?.emails_sent ?? 0 },
+    { label: "Delivered", value: topStats?.delivered ?? 0 },
+    { label: "Opened", value: topStats?.opened ?? 0 },
+    { label: "Clicked", value: topStats?.clicked ?? 0 },
+    { label: "Bounced", value: topStats?.bounced ?? 0 },
+    { label: "Unsubscribed", value: topStats?.unsubscribed ?? 0 },
+    { label: "Spam Complaints", value: topStats?.spam_complaints ?? 0 },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -99,15 +182,38 @@ export default function AnalyticsPage() {
         </button>
       </div>
 
+      <p className="text-xs text-slate-400">
+        Click a stat to see matching recipients{selectedCampaignId ? "" : " across all campaigns"} — click again to
+        clear.
+      </p>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-        <StatCard label="Emails Sent" value={topStats?.emails_sent ?? 0} />
-        <StatCard label="Delivered" value={topStats?.delivered ?? 0} />
-        <StatCard label="Opened" value={topStats?.opened ?? 0} />
-        <StatCard label="Clicked" value={topStats?.clicked ?? 0} />
-        <StatCard label="Bounced" value={topStats?.bounced ?? 0} />
-        <StatCard label="Unsubscribed" value={topStats?.unsubscribed ?? 0} />
-        <StatCard label="Spam Complaints" value={topStats?.spam_complaints ?? 0} />
+        {STAT_CARDS.map((s) => {
+          const filterValue = RECIPIENT_STATUS_FILTERS[s.label];
+          return (
+            <StatCard
+              key={s.label}
+              label={s.label}
+              value={s.value}
+              onClick={() => handleStatCardClick(filterValue)}
+              active={statusFilter === filterValue}
+            />
+          );
+        })}
       </div>
+
+      {statusFilter && (
+        <RecipientsPanel
+          recipients={recipients}
+          statusFilter={statusFilter}
+          onClear={() => applyStatusFilter(null)}
+          hasMore={recipientsHasMore}
+          loadingMore={loadingMoreRecipients}
+          onLoadMore={loadMoreRecipients}
+          loading={loadingRecipients}
+          totalCount={recipientsTotal}
+          showCampaignColumn={!selectedCampaignId}
+        />
+      )}
 
       {summary?.emails_sent > 0 && summary?.delivered === 0 && (
         <div className="card p-4 bg-blue-50 border-blue-200">

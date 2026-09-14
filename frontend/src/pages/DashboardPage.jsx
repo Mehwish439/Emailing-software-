@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
+import RecipientsPanel from "../components/RecipientsPanel";
 import Spinner from "../components/Spinner";
 import StatCard from "../components/StatCard";
 import StatusBadge from "../components/StatusBadge";
-import { getDashboardSummary } from "../services/analyticsService";
+import { useToast } from "../context/ToastContext";
+import { getAllRecipients, getDashboardSummary } from "../services/analyticsService";
 import { listCampaigns } from "../services/campaignService";
 import { listScheduledCampaigns } from "../services/schedulingService";
+import { RECIPIENT_STATUS_FILTERS } from "../utils/recipientStatusFilters";
 
 const QUICK_ACTIONS = [
   { label: "Add Contact", to: "/contacts", icon: "M12 4v16m8-8H4" },
@@ -17,10 +20,24 @@ const QUICK_ACTIONS = [
 ];
 
 export default function DashboardPage() {
+  const { showToast } = useToast();
+
   const [summary, setSummary] = useState(null);
   const [recentCampaigns, setRecentCampaigns] = useState([]);
   const [upcoming, setUpcoming] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Clicking a stat card below (e.g. "Delivered") filters the recipients
+  // panel to just that status, across ALL campaigns — same interaction as
+  // the campaign detail page's stat cards, but not scoped to one campaign.
+  // null means no card is active / the panel is hidden.
+  const [statusFilter, setStatusFilter] = useState(null);
+  const [recipients, setRecipients] = useState([]);
+  const [recipientsPage, setRecipientsPage] = useState(1);
+  const [recipientsTotal, setRecipientsTotal] = useState(null);
+  const [recipientsHasMore, setRecipientsHasMore] = useState(false);
+  const [loadingRecipients, setLoadingRecipients] = useState(false);
+  const [loadingMoreRecipients, setLoadingMoreRecipients] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -39,6 +56,48 @@ export default function DashboardPage() {
       }
     })();
   }, []);
+
+  const applyStatusFilter = async (value) => {
+    setStatusFilter(value);
+    if (!value) {
+      setRecipients([]);
+      setRecipientsHasMore(false);
+      setRecipientsTotal(null);
+      return;
+    }
+    setLoadingRecipients(true);
+    try {
+      const data = await getAllRecipients({ status: value, page: 1, page_size: 50 });
+      setRecipients(data.results || []);
+      setRecipientsPage(1);
+      setRecipientsHasMore(Boolean(data.next));
+      setRecipientsTotal(data.count ?? null);
+    } catch {
+      showToast("Failed to load recipients.", "error");
+    } finally {
+      setLoadingRecipients(false);
+    }
+  };
+
+  // Clicking the same stat again clears the filter (hides the panel).
+  const handleStatCardClick = (value) => {
+    applyStatusFilter(statusFilter === value ? null : value);
+  };
+
+  const loadMoreRecipients = async () => {
+    setLoadingMoreRecipients(true);
+    try {
+      const nextPage = recipientsPage + 1;
+      const data = await getAllRecipients({ status: statusFilter, page: nextPage, page_size: 50 });
+      setRecipients((prev) => [...prev, ...(data.results || [])]);
+      setRecipientsPage(nextPage);
+      setRecipientsHasMore(Boolean(data.next));
+    } catch {
+      showToast("Failed to load more recipients.", "error");
+    } finally {
+      setLoadingMoreRecipients(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -68,11 +127,37 @@ export default function DashboardPage() {
         <p className="text-sm text-slate-500">Here's how your campaigns are performing.</p>
       </div>
 
+      <p className="text-xs text-slate-400">
+        Click a stat to see matching recipients across all campaigns — click again to clear.
+      </p>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        {stats.map((s) => (
-          <StatCard key={s.label} label={s.label} value={s.value} />
-        ))}
+        {stats.map((s) => {
+          const filterValue = RECIPIENT_STATUS_FILTERS[s.label];
+          return (
+            <StatCard
+              key={s.label}
+              label={s.label}
+              value={s.value}
+              onClick={filterValue ? () => handleStatCardClick(filterValue) : undefined}
+              active={Boolean(filterValue) && statusFilter === filterValue}
+            />
+          );
+        })}
       </div>
+
+      {statusFilter && (
+        <RecipientsPanel
+          recipients={recipients}
+          statusFilter={statusFilter}
+          onClear={() => applyStatusFilter(null)}
+          hasMore={recipientsHasMore}
+          loadingMore={loadingMoreRecipients}
+          onLoadMore={loadMoreRecipients}
+          loading={loadingRecipients}
+          totalCount={recipientsTotal}
+          showCampaignColumn
+        />
+      )}
 
       <div className="card p-5">
         <h2 className="text-sm font-semibold text-slate-900 mb-3">Quick actions</h2>
