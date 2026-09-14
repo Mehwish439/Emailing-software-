@@ -5,6 +5,27 @@ from common.validators import is_valid_email
 from .models import Contact, ContactList, Segment, Tag
 
 
+def scope_many_related_queryset(field, queryset):
+    """
+    Restricts a PrimaryKeyRelatedField's allowed values to `queryset`,
+    correctly handling both a plain field and a many=True one.
+
+    For many=True, DRF wraps the actual PrimaryKeyRelatedField in a
+    ManyRelatedField — validating each submitted pk checks
+    child_relation.queryset, NOT the outer field's own .queryset attribute.
+    Setting only the outer .queryset (as this code used to do) is silently
+    a no-op: the inner check keeps using its original (often empty)
+    queryset, so every submitted id gets rejected as "object does not
+    exist" — regardless of whether it's real and correctly owned. This is
+    what broke creating a Segment (or a Contact/Campaign with
+    lists/tags/segments set) via the API.
+    """
+    if hasattr(field, "child_relation"):
+        field.child_relation.queryset = queryset
+    else:
+        field.queryset = queryset
+
+
 class TagSerializer(serializers.ModelSerializer):
     contact_count = serializers.IntegerField(read_only=True)
 
