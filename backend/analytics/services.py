@@ -99,8 +99,26 @@ def compute_campaign_link_breakdown(campaign: Campaign):
     }
 
 
-def compute_campaign_analytics(campaign: Campaign):
-    agg = CampaignRecipient.objects.filter(campaign=campaign).aggregate(
+def compute_campaign_analytics(campaign: Campaign, recipients_queryset=None):
+    """
+    `recipients_queryset` (optional): compute the same breakdown over a
+    subset of this campaign's recipients instead of all of them — used by
+    ab_testing.services.compute_ab_test_results to get each variant's own
+    Sent/Delivered/Opened/... numbers without duplicating this aggregation
+    logic. Defaults to every recipient of `campaign`, i.e. unchanged
+    behavior for every existing (non-A/B) call site.
+    """
+    if recipients_queryset is None:
+        recipients_queryset = CampaignRecipient.objects.filter(campaign=campaign)
+        events_queryset = campaign.events.all()
+    else:
+        # Scope the event log to just this subset's contacts too -- e.g. for
+        # a per-variant call from ab_testing.services.compute_ab_test_results,
+        # so Version A's soft/hard-bounce counts below don't leak in Version
+        # B's (or the whole campaign's) events.
+        events_queryset = campaign.events.filter(contact_id__in=recipients_queryset.values("contact_id"))
+
+    agg = recipients_queryset.aggregate(
         sent=Count("id", filter=~Q(status=CampaignRecipient.Status.PENDING)),
         delivered=Count(
             "id",
@@ -123,7 +141,7 @@ def compute_campaign_analytics(campaign: Campaign):
     # Soft vs hard bounce distinction comes from the event log (a different
     # table), so it's a second query — still just 2 round trips total
     # instead of the original 10.
-    event_agg = campaign.events.aggregate(
+    event_agg = events_queryset.aggregate(
         soft_bounced=Count("contact_id", filter=Q(event_type="soft_bounce"), distinct=True),
         hard_bounced=Count("contact_id", filter=Q(event_type="hard_bounce"), distinct=True),
     )

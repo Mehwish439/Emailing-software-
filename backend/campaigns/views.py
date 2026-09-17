@@ -42,10 +42,25 @@ class CampaignViewSet(viewsets.ModelViewSet):
             sender_name=campaign.sender_name,
             sender_email=campaign.sender_email,
             template=campaign.template,
+            campaign_type=campaign.campaign_type,
             created_by=request.user,
             status=Campaign.Status.DRAFT,
         )
         clone.contact_lists.set(campaign.contact_lists.all())
+        if campaign.campaign_type == Campaign.CampaignType.AB_TEST:
+            # Clone each A/B variant too, so a duplicated A/B campaign is
+            # immediately ready to edit/send rather than needing its
+            # variants rebuilt from scratch.
+            from ab_testing.models import CampaignVariant
+
+            for variant in campaign.ab_variants.all():
+                CampaignVariant.objects.create(
+                    campaign=clone,
+                    label=variant.label,
+                    subject=variant.subject,
+                    template=variant.template,
+                    split_percentage=variant.split_percentage,
+                )
         return Response(CampaignSerializer(clone, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"])
@@ -53,19 +68,37 @@ class CampaignViewSet(viewsets.ModelViewSet):
         from email_templates.rendering import render_template_for_contact
 
         campaign = self.get_object()
+
+        # For an A/B campaign, ?variant=A or ?variant=B previews that
+        # specific version's own subject/template instead of the
+        # campaign-level (Version-A-mirrored) default -- this is what lets
+        # the frontend preview BOTH versions (see the feature's Step 1 --
+        # "The user should be able to preview both versions").
+        variant_label = (request.query_params.get("variant") or "").upper() or None
+        variant = None
+        if variant_label:
+            if campaign.campaign_type != Campaign.CampaignType.AB_TEST:
+                return Response({"detail": "This campaign is not an A/B test campaign."}, status=400)
+            variant = campaign.ab_variants.filter(label=variant_label).first()
+            if variant is None:
+                return Response({"detail": f"Version {variant_label} is not configured for this campaign yet."}, status=404)
+
+        subject_source = variant.subject if variant else campaign.subject
+        html_source = variant.template.html_content if variant else campaign.template.html_content
+
         # Render with a real contact from the campaign's selected lists when
         # one exists, so the preview shows actual {{variable}} values (and
         # never raw {{...}} placeholders) instead of just the raw template.
         sample_contact = campaign.eligible_contacts_queryset().first()
         if sample_contact is not None:
             subject, html_content = render_template_for_contact(
-                campaign.subject,
-                campaign.template.html_content,
+                subject_source,
+                html_source,
                 sample_contact,
                 extra_fields={"unsubscribe_url": "#"},
             )
         else:
-            subject, html_content = campaign.subject, campaign.template.html_content
+            subject, html_content = subject_source, html_source
 
         return Response(
             {
@@ -73,6 +106,7 @@ class CampaignViewSet(viewsets.ModelViewSet):
                 "sender_name": campaign.sender_name,
                 "sender_email": campaign.sender_email,
                 "html_content": html_content,
+                "variant": variant_label,
             }
         )
 
@@ -84,8 +118,18 @@ class CampaignViewSet(viewsets.ModelViewSet):
         campaign = self.get_object()
         serializer = SendTestEmailSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        variant = None
+        variant_label = serializer.validated_data.get("variant")
+        if variant_label:
+            if campaign.campaign_type != Campaign.CampaignType.AB_TEST:
+                return Response({"detail": "This campaign is not an A/B test campaign."}, status=400)
+            variant = campaign.ab_variants.filter(label=variant_label).first()
+            if variant is None:
+                return Response({"detail": f"Version {variant_label} is not configured for this campaign yet."}, status=400)
+
         try:
-            send_test_email(campaign, serializer.validated_data["test_email"])
+            send_test_email(campaign, serializer.validated_data["test_email"], variant=variant)
         except BrevoAPIError as exc:
             return Response({"detail": str(exc)}, status=502)
         return Response({"detail": f"Test email sent to {serializer.validated_data['test_email']}."})
@@ -143,7 +187,3 @@ class CampaignViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(queryset)
         serializer = CampaignRecipientSerializer(page, many=True)
         return self.get_paginated_response(serializer.data)
-
-
-
-

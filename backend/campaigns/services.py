@@ -52,10 +52,14 @@ def validate_campaign_sendable(campaign: Campaign):
         raise ValidationAppError("Campaign must have a template.")
     if not campaign.sender_email:
         raise ValidationAppError("Campaign must have a sender email.")
-    if not campaign.contact_lists.exists() and not campaign.segments.exists():
-        raise ValidationAppError("Campaign must have at least one contact list or segment selected.")
+    if not campaign.contact_lists.exists():
+        raise ValidationAppError("Campaign must have at least one contact list selected.")
     if not campaign.eligible_contacts_queryset().exists():
         raise ValidationAppError("Campaign has no eligible (non-suppressed, active) recipients.")
+    if campaign.campaign_type == Campaign.CampaignType.AB_TEST:
+        from ab_testing.services import validate_ab_campaign_variants
+
+        validate_ab_campaign_variants(campaign)
 
 
 def build_recipient_snapshot(campaign: Campaign):
@@ -73,6 +77,18 @@ def build_recipient_snapshot(campaign: Campaign):
     ]
     if new_rows:
         CampaignRecipient.objects.bulk_create(new_rows, ignore_conflicts=True)
+
+    if campaign.campaign_type == Campaign.CampaignType.AB_TEST:
+        # Assigns every recipient row that doesn't yet have a variant
+        # (never reassigns one that already does — see that function's
+        # docstring) to Version A or Version B, honoring the configured
+        # split. validate_campaign_sendable (called just before this, in
+        # _claim_campaign_for_sending) already guarantees both variants
+        # exist by the time sending actually happens.
+        from ab_testing.services import assign_unassigned_recipients
+
+        assign_unassigned_recipients(campaign)
+
     return campaign.recipients.count()
 
 
@@ -127,7 +143,7 @@ def _send_pending_recipients(campaign: Campaign):
 
     pending = list(
         campaign.recipients.filter(status=CampaignRecipient.Status.PENDING)
-        .select_related("contact")
+        .select_related("contact", "variant", "variant__template")
         .order_by("id")[: settings.CAMPAIGN_SEND_BATCH_SIZE]
     )
     if not pending:
@@ -178,22 +194,12 @@ def _send_pending_recipients(campaign: Campaign):
 def _sync_schedule_on_finalize(campaign: Campaign):
     """
     If this campaign was started via a schedule (scheduling.models.
-    ScheduledCampaign), reflects that its send process has actually
-    finished onto that schedule row too -- this is the piece that was
-    missing before: a campaign could reach SENT/FAILED while its schedule
-    stayed at PROCESSING forever, which is exactly why the scheduler kept
-    reporting "no due schedules found" even with a campaign still
-    (invisibly) needing attention.
-
-    The schedule becomes COMPLETED whenever sending finished being
-    attempted for every recipient -- regardless of whether the campaign's
-    own outcome was SENT or FAILED (e.g. every recipient bounced/failed):
-    the schedule's job was to trigger and drive the send to completion, and
-    it did. ScheduledCampaign.Status.FAILED is reserved for a process-level
-    failure caught in scheduling.services._process_one_schedule (e.g. a
-    ValidationAppError or unexpected exception during the send attempt
-    itself) — not for a campaign that finished sending but had a bad
-    outcome. Local import avoids a circular import (scheduling already
+    ScheduledCampaign), reflects the campaign's now-final status onto that
+    schedule row too -- this is the piece that was missing before: a
+    campaign could reach SENT/FAILED while its schedule stayed at
+    PROCESSING forever, which is exactly why the scheduler kept reporting
+    "no due schedules found" even with a campaign still (invisibly) needing
+    attention. Local import avoids a circular import (scheduling already
     imports from campaigns).
     """
     from scheduling.models import ScheduledCampaign
@@ -202,10 +208,14 @@ def _sync_schedule_on_finalize(campaign: Campaign):
     if schedule is None or schedule.status != ScheduledCampaign.Status.PROCESSING:
         return
 
-    if campaign.status in (Campaign.Status.SENT, Campaign.Status.FAILED):
+    if campaign.status == Campaign.Status.SENT:
         schedule.status = ScheduledCampaign.Status.COMPLETED
         schedule.completed_at = timezone.now()
         schedule.save(update_fields=["status", "completed_at", "updated_at"])
+    elif campaign.status == Campaign.Status.FAILED:
+        schedule.status = ScheduledCampaign.Status.FAILED
+        schedule.error_message = campaign.failure_reason
+        schedule.save(update_fields=["status", "error_message", "updated_at"])
 
 
 def _finalize_campaign(campaign: Campaign):

@@ -43,7 +43,7 @@ def _sample_contact_for_test(campaign, test_email):
     )
 
 
-def send_test_email(campaign, test_email):
+def send_test_email(campaign, test_email, variant=None):
     """
     Sends a one-off test email for a campaign via Brevo's transactional endpoint.
     Raises BrevoAPIError on failure — never silently swallowed.
@@ -53,21 +53,31 @@ def send_test_email(campaign, test_email):
     would see. Test sends don't unsubscribe anyone real, so
     {{unsubscribe_url}} is replaced with a harmless "#" placeholder rather
     than a working link, and no List-Unsubscribe header is set.
+
+    `variant` (optional): an ab_testing.CampaignVariant belonging to this
+    campaign. When given, tests THAT version's subject/template instead of
+    the campaign's own (Version-A-mirrored) subject/template — see
+    campaigns/views.py's send_test action.
     """
     client = BrevoClient()
     sample_contact = _sample_contact_for_test(campaign, test_email)
+    subject_source = variant.subject if variant else campaign.subject
+    html_source = variant.template.html_content if variant else campaign.template.html_content
     subject, html_content = render_template_for_contact(
-        f"[TEST] {campaign.subject}",
-        campaign.template.html_content,
+        f"[TEST] {subject_source}",
+        html_source,
         sample_contact,
         extra_fields={"unsubscribe_url": "#"},
     )
+    tags = ["test-email", f"campaign-{campaign.id}"]
+    if variant:
+        tags.append(f"ab-variant-{variant.label}")
     return client.send_transactional_email(
         sender=_sender_payload(campaign),
         to=[{"email": test_email}],
         subject=subject,
         html_content=html_content,
-        tags=["test-email", f"campaign-{campaign.id}"],
+        tags=tags,
     )
 
 
@@ -89,29 +99,45 @@ def send_to_recipient(campaign, recipient):
         their UI. This also meaningfully helps inbox placement — bulk mail
         sent without these headers is one of the more common reasons
         mailbox providers route messages to spam.
+
+    For an A/B test campaign, `recipient.variant` (set by
+    ab_testing.services.assign_unassigned_recipients before this ever
+    runs) picks which version's subject/template is actually sent —
+    falling back to the campaign's own subject/template (unchanged
+    behavior) whenever recipient.variant is None, i.e. every normal
+    campaign, exactly as before.
     """
     client = BrevoClient()
     contact = recipient.contact
+    variant = recipient.variant
     unsubscribe_url = _build_unsubscribe_url(contact.id, campaign.id)
+    subject_source = variant.subject if variant else campaign.subject
+    html_source = variant.template.html_content if variant else campaign.template.html_content
     subject, html_content = render_template_for_contact(
-        campaign.subject,
-        campaign.template.html_content,
+        subject_source,
+        html_source,
         contact,
         extra_fields={"unsubscribe_url": unsubscribe_url},
     )
+
+    tags = [f"campaign-{campaign.id}"]
+    headers = {
+        "X-Campaign-Id": str(campaign.id),
+        "X-Recipient-Id": str(recipient.id),
+        "List-Unsubscribe": f"<{unsubscribe_url}>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    }
+    if variant:
+        tags.append(f"ab-variant-{variant.label}")
+        headers["X-AB-Variant"] = variant.label
 
     return client.send_transactional_email(
         sender=_sender_payload(campaign),
         to=[{"email": contact.email, "name": contact.full_name}],
         subject=subject,
         html_content=html_content,
-        tags=[f"campaign-{campaign.id}"],
-        headers={
-            "X-Campaign-Id": str(campaign.id),
-            "X-Recipient-Id": str(recipient.id),
-            "List-Unsubscribe": f"<{unsubscribe_url}>",
-            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-        },
+        tags=tags,
+        headers=headers,
     )
 
 

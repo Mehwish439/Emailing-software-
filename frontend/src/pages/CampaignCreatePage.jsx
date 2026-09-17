@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import DateTimeTimezonePicker from "../components/DateTimeTimezonePicker";
 import Modal from "../components/Modal";
 import { useToast } from "../context/ToastContext";
-import { createCampaign, sendCampaignNow, sendTestEmail } from "../services/campaignService";
-import { createContactList, importContactsCSV, listContactLists, listSegments } from "../services/contactService";
+import { createCampaign, sendCampaignNow, setCampaignVariants } from "../services/campaignService";
+import { createContactList, importContactsCSV, listContactLists } from "../services/contactService";
 import { createSchedule } from "../services/schedulingService";
 import { listTemplates } from "../services/templateService";
 import { localDateTimeInZoneToUTC } from "../utils/timezone";
@@ -47,10 +47,24 @@ export default function CampaignCreatePage() {
     sender_email: "",
     template: "",
     contact_lists: [],
-    segments: [],
   });
 
-  const [segments, setSegments] = useState([]);
+  // A/B testing — "normal" (default, existing behavior) or "ab_test".
+  const [campaignType, setCampaignType] = useState("normal");
+  const [abVariants, setAbVariants] = useState({
+    A: { subject: "", template: "" },
+    B: { subject: "", template: "" },
+  });
+  const [splitMode, setSplitMode] = useState("50/50"); // "50/50" | "30/70" | "custom"
+  const [customSplitA, setCustomSplitA] = useState(50);
+  const [abPreview, setAbPreview] = useState(null); // { variant: "A"|"B", subject, html_content } | null
+
+  const splitA = splitMode === "50/50" ? 50 : splitMode === "30/70" ? 30 : customSplitA;
+  const splitB = 100 - splitA;
+
+  const updateVariant = (label, field, value) => {
+    setAbVariants((prev) => ({ ...prev, [label]: { ...prev[label], [field]: value } }));
+  };
 
   const [sendChoice, setSendChoice] = useState("now"); // "now" | "schedule"
   const [scheduleValue, setScheduleValue] = useState({ date: defaultDate(), time: "10:00", timezone: "Asia/Karachi" });
@@ -60,15 +74,15 @@ export default function CampaignCreatePage() {
   useEffect(() => {
     listTemplates({ page_size: 100 }).then((data) => setTemplates(data.results || []));
     listContactLists({ page_size: 100 }).then((data) => setLists(data.results || data || []));
-    listSegments({ page_size: 100 }).then((data) => setSegments(data.results || data || []));
   }, []);
 
   const selectedTemplate = templates.find((t) => String(t.id) === String(form.template));
+  const abSummary =
+    campaignType === "ab_test"
+      ? `Version A: "${abVariants.A.subject || "—"}" / Version B: "${abVariants.B.subject || "—"}" (${splitA}% / ${splitB}% split)`
+      : null;
   const selectedLists = lists.filter((l) => form.contact_lists.includes(l.id));
-  const selectedSegments = segments.filter((s) => form.segments.includes(s.id));
-  const totalRecipients =
-    selectedLists.reduce((sum, l) => sum + (l.contact_count || 0), 0) +
-    selectedSegments.reduce((sum, s) => sum + (s.contact_count || 0), 0);
+  const totalRecipients = selectedLists.reduce((sum, l) => sum + (l.contact_count || 0), 0);
 
   const toggleList = (id) => {
     setForm((prev) => ({
@@ -76,13 +90,6 @@ export default function CampaignCreatePage() {
       contact_lists: prev.contact_lists.includes(id)
         ? prev.contact_lists.filter((x) => x !== id)
         : [...prev.contact_lists, id],
-    }));
-  };
-
-  const toggleSegment = (id) => {
-    setForm((prev) => ({
-      ...prev,
-      segments: prev.segments.includes(id) ? prev.segments.filter((x) => x !== id) : [...prev.segments, id],
     }));
   };
 
@@ -141,9 +148,18 @@ export default function CampaignCreatePage() {
   };
 
   const canProceed = () => {
-    if (step === 0) return form.name && form.subject && form.sender_name && form.sender_email;
-    if (step === 1) return form.contact_lists.length > 0 || form.segments.length > 0;
-    if (step === 2) return !!form.template;
+    if (step === 0) {
+      return form.name && form.sender_name && form.sender_email && (campaignType === "ab_test" || form.subject);
+    }
+    if (step === 1) return form.contact_lists.length > 0;
+    if (step === 2) {
+      if (campaignType === "ab_test") {
+        return (
+          abVariants.A.subject && abVariants.A.template && abVariants.B.subject && abVariants.B.template
+        );
+      }
+      return !!form.template;
+    }
     return true;
   };
 
@@ -154,7 +170,24 @@ export default function CampaignCreatePage() {
     setSubmitting(true);
     setScheduleError("");
     try {
-      const campaign = await createCampaign(form);
+      const payload = { ...form, campaign_type: campaignType };
+      if (campaignType === "ab_test") {
+        // The campaign row itself still needs a subject/template at
+        // creation time (see campaigns/models.py) -- Version A's values
+        // fill that in, and setCampaignVariants below is what actually
+        // configures both versions for real. The backend keeps the
+        // campaign's own subject/template mirroring Version A from then on.
+        payload.subject = abVariants.A.subject;
+        payload.template = abVariants.A.template;
+      }
+      const campaign = await createCampaign(payload);
+
+      if (campaignType === "ab_test") {
+        await setCampaignVariants(campaign.id, [
+          { label: "A", subject: abVariants.A.subject, template: abVariants.A.template, split_percentage: splitA },
+          { label: "B", subject: abVariants.B.subject, template: abVariants.B.template, split_percentage: splitB },
+        ]);
+      }
 
       if (sendChoice === "now") {
         await sendCampaignNow(campaign.id);
@@ -213,10 +246,51 @@ export default function CampaignCreatePage() {
               <label className="label">Campaign name</label>
               <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </div>
+
             <div>
-              <label className="label">Subject line</label>
-              <input className="input" value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} />
+              <label className="label">Campaign Type</label>
+              <div className="flex gap-3">
+                <label
+                  className={`flex-1 rounded-lg border px-4 py-3 cursor-pointer text-sm font-medium ${
+                    campaignType === "normal" ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    className="sr-only"
+                    checked={campaignType === "normal"}
+                    onChange={() => setCampaignType("normal")}
+                  />
+                  Normal Campaign
+                </label>
+                <label
+                  className={`flex-1 rounded-lg border px-4 py-3 cursor-pointer text-sm font-medium ${
+                    campaignType === "ab_test" ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    className="sr-only"
+                    checked={campaignType === "ab_test"}
+                    onChange={() => setCampaignType("ab_test")}
+                  />
+                  A/B Test Campaign
+                </label>
+              </div>
+              {campaignType === "ab_test" && (
+                <p className="mt-2 text-xs text-slate-500">
+                  You'll set up Version A and Version B's subject line and content in the "Email Content" step.
+                </p>
+              )}
             </div>
+
+            {campaignType === "normal" && (
+              <div>
+                <label className="label">Subject line</label>
+                <input className="input" value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} />
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">Sender name</label>
@@ -270,28 +344,6 @@ export default function CampaignCreatePage() {
                 ))}
               </div>
             )}
-            {segments.length > 0 && (
-              <>
-                <p className="text-sm text-slate-600 pt-2">
-                  Or target a dynamic <Link to="/contacts/segments" className="text-brand-600 hover:underline">segment</Link> — its
-                  membership updates automatically as contacts' tags/status change.
-                </p>
-                <div className="space-y-2">
-                  {segments.map((s) => (
-                    <label
-                      key={s.id}
-                      className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3 cursor-pointer hover:bg-slate-50"
-                    >
-                      <div className="flex items-center gap-3">
-                        <input type="checkbox" checked={form.segments.includes(s.id)} onChange={() => toggleSegment(s.id)} />
-                        <span className="text-sm font-medium text-slate-900">{s.name}</span>
-                      </div>
-                      <span className="text-xs text-slate-500">{s.contact_count} contacts</span>
-                    </label>
-                  ))}
-                </div>
-              </>
-            )}
             {totalRecipients > 0 && (
               <p className="text-sm text-slate-600">
                 Estimated recipients: <span className="font-semibold">{totalRecipients}</span>
@@ -302,29 +354,148 @@ export default function CampaignCreatePage() {
 
         {step === 2 && (
           <div className="space-y-3">
-            <p className="text-sm text-slate-600">Choose the email template for this campaign.</p>
-            {templates.length === 0 ? (
-              <p className="text-sm text-slate-500">No templates found. Create one first from the Templates page.</p>
+            {campaignType === "normal" ? (
+              <>
+                <p className="text-sm text-slate-600">Choose the email template for this campaign.</p>
+                {templates.length === 0 ? (
+                  <p className="text-sm text-slate-500">No templates found. Create one first from the Templates page.</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {templates.map((t) => (
+                      <label
+                        key={t.id}
+                        className={`rounded-lg border px-4 py-3 cursor-pointer ${
+                          String(form.template) === String(t.id) ? "border-brand-500 ring-1 ring-brand-500" : "border-slate-200"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="template"
+                          className="sr-only"
+                          checked={String(form.template) === String(t.id)}
+                          onChange={() => setForm({ ...form, template: t.id })}
+                        />
+                        <p className="text-sm font-medium text-slate-900">{t.name}</p>
+                        <p className="text-xs text-slate-500">{t.subject}</p>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {templates.map((t) => (
-                  <label
-                    key={t.id}
-                    className={`rounded-lg border px-4 py-3 cursor-pointer ${
-                      String(form.template) === String(t.id) ? "border-brand-500 ring-1 ring-brand-500" : "border-slate-200"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="template"
-                      className="sr-only"
-                      checked={String(form.template) === String(t.id)}
-                      onChange={() => setForm({ ...form, template: t.id })}
-                    />
-                    <p className="text-sm font-medium text-slate-900">{t.name}</p>
-                    <p className="text-xs text-slate-500">{t.subject}</p>
-                  </label>
+              <div className="space-y-6">
+                <p className="text-sm text-slate-600">
+                  Set up Version A and Version B's subject line and content. Both are sent to a split of your selected
+                  audience, and each contact only ever receives one version.
+                </p>
+
+                {["A", "B"].map((label) => (
+                  <div key={label} className="rounded-lg border border-slate-200 p-4 space-y-3">
+                    <p className="text-sm font-semibold text-slate-900">Version {label}</p>
+                    <div>
+                      <label className="label">Subject</label>
+                      <input
+                        className="input"
+                        value={abVariants[label].subject}
+                        onChange={(e) => updateVariant(label, "subject", e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Email content / template</label>
+                      {templates.length === 0 ? (
+                        <p className="text-sm text-slate-500">No templates found. Create one first from the Templates page.</p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {templates.map((t) => (
+                            <label
+                              key={t.id}
+                              className={`rounded-lg border px-3 py-2 cursor-pointer ${
+                                String(abVariants[label].template) === String(t.id)
+                                  ? "border-brand-500 ring-1 ring-brand-500"
+                                  : "border-slate-200"
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name={`template-${label}`}
+                                className="sr-only"
+                                checked={String(abVariants[label].template) === String(t.id)}
+                                onChange={() => updateVariant(label, "template", t.id)}
+                              />
+                              <p className="text-sm font-medium text-slate-900">{t.name}</p>
+                              <p className="text-xs text-slate-500">{t.subject}</p>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 ))}
+
+                <div>
+                  <label className="label">Audience Split</label>
+                  <div className="flex flex-wrap gap-2">
+                    {["50/50", "30/70", "custom"].map((mode) => (
+                      <label
+                        key={mode}
+                        className={`rounded-lg border px-4 py-2 cursor-pointer text-sm font-medium ${
+                          splitMode === mode ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600"
+                        }`}
+                      >
+                        <input type="radio" className="sr-only" checked={splitMode === mode} onChange={() => setSplitMode(mode)} />
+                        {mode === "custom" ? "Custom" : mode}
+                      </label>
+                    ))}
+                  </div>
+                  {splitMode === "custom" && (
+                    <div className="mt-3 flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={1}
+                        max={99}
+                        value={customSplitA}
+                        onChange={(e) => setCustomSplitA(Number(e.target.value))}
+                        className="flex-1"
+                      />
+                      <span className="text-sm text-slate-600 w-28 text-right">
+                        A: {customSplitA}% / B: {100 - customSplitA}%
+                      </span>
+                    </div>
+                  )}
+                  {splitMode !== "custom" && (
+                    <p className="mt-2 text-sm text-slate-600">
+                      Version A: <span className="font-semibold">{splitA}%</span> / Version B:{" "}
+                      <span className="font-semibold">{splitB}%</span>
+                      {totalRecipients > 0 && (
+                        <>
+                          {" "}
+                          (~{Math.round((totalRecipients * splitA) / 100)} / ~{Math.round((totalRecipients * splitB) / 100)}{" "}
+                          of {totalRecipients} contacts)
+                        </>
+                      )}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  {["A", "B"].map((label) => (
+                    <button
+                      key={label}
+                      type="button"
+                      className="btn-secondary text-xs"
+                      disabled={!abVariants[label].subject || !abVariants[label].template}
+                      onClick={() =>
+                        setAbPreview({
+                          variant: label,
+                          subject: abVariants[label].subject,
+                          html_content: templates.find((t) => String(t.id) === String(abVariants[label].template))?.html_content || "",
+                        })
+                      }
+                    >
+                      Preview Version {label}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -334,19 +505,47 @@ export default function CampaignCreatePage() {
           <div className="space-y-4">
             <dl className="divide-y divide-slate-100 text-sm">
               <Row label="Campaign Name" value={form.name} />
-              <Row label="Subject" value={form.subject} />
+              <Row label="Campaign Type" value={campaignType === "ab_test" ? "A/B Test Campaign" : "Normal Campaign"} />
+              {campaignType === "ab_test" ? (
+                <Row label="Versions" value={abSummary} />
+              ) : (
+                <>
+                  <Row label="Subject" value={form.subject} />
+                  <Row label="Template" value={selectedTemplate?.name || "—"} />
+                </>
+              )}
               <Row label="Sender" value={`${form.sender_name} <${form.sender_email}>`} />
-              <Row label="Template" value={selectedTemplate?.name || "—"} />
               <Row label="Recipients" value={`${selectedLists.map((l) => l.name).join(", ") || "—"} (${totalRecipients} contacts)`} />
             </dl>
-            {selectedTemplate && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                <p className="text-xs text-slate-400 mb-2">Content preview</p>
-                <div
-                  className="bg-white rounded-lg p-4"
-                  dangerouslySetInnerHTML={{ __html: selectedTemplate.html_content }}
-                />
+            {campaignType === "ab_test" ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {["A", "B"].map((label) => {
+                  const t = templates.find((tpl) => String(tpl.id) === String(abVariants[label].template));
+                  return (
+                    <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs text-slate-400 mb-2">
+                        Version {label} — "{abVariants[label].subject}"
+                      </p>
+                      {t && (
+                        <div
+                          className="bg-white rounded-lg p-3 max-h-64 overflow-auto text-xs"
+                          dangerouslySetInnerHTML={{ __html: t.html_content }}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
               </div>
+            ) : (
+              selectedTemplate && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs text-slate-400 mb-2">Content preview</p>
+                  <div
+                    className="bg-white rounded-lg p-4"
+                    dangerouslySetInnerHTML={{ __html: selectedTemplate.html_content }}
+                  />
+                </div>
+              )
             )}
           </div>
         )}
@@ -396,9 +595,15 @@ export default function CampaignCreatePage() {
 
             <dl className="divide-y divide-slate-100 text-sm rounded-lg border border-slate-200 px-4">
               <Row label="Campaign Name" value={form.name} />
-              <Row label="Subject" value={form.subject} />
+              {campaignType === "ab_test" ? (
+                <Row label="Versions" value={abSummary} />
+              ) : (
+                <>
+                  <Row label="Subject" value={form.subject} />
+                  <Row label="Template" value={selectedTemplate?.name || "—"} />
+                </>
+              )}
               <Row label="Sender" value={`${form.sender_name} <${form.sender_email}>`} />
-              <Row label="Template" value={selectedTemplate?.name || "—"} />
               <Row label="Recipients" value={`${totalRecipients} contacts`} />
               {sendChoice === "schedule" && (
                 <>
@@ -411,6 +616,19 @@ export default function CampaignCreatePage() {
           </div>
         )}
       </div>
+
+      {/* A/B variant preview modal */}
+      <Modal open={!!abPreview} onClose={() => setAbPreview(null)} title={abPreview ? `Preview — Version ${abPreview.variant}` : ""}>
+        {abPreview && (
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-slate-900">{abPreview.subject}</p>
+            <div
+              className="bg-white border border-slate-200 rounded-lg p-4 max-h-96 overflow-auto"
+              dangerouslySetInnerHTML={{ __html: abPreview.html_content }}
+            />
+          </div>
+        )}
+      </Modal>
 
       <div className="flex justify-between">
         <button className="btn-secondary" onClick={handleBack} disabled={step === 0}>

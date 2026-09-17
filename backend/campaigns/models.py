@@ -15,14 +15,25 @@ class Campaign(TimeStampedModel):
         CANCELLED = "cancelled", "Cancelled"
         FAILED = "failed", "Failed"
 
+    class CampaignType(models.TextChoices):
+        NORMAL = "normal", "Normal Campaign"
+        AB_TEST = "ab_test", "A/B Test Campaign"
+
     name = models.CharField(max_length=255)
     subject = models.CharField(max_length=255)
     sender_name = models.CharField(max_length=255)
     sender_email = models.EmailField()
     template = models.ForeignKey(EmailTemplate, on_delete=models.PROTECT, related_name="campaigns")
     contact_lists = models.ManyToManyField(ContactList, related_name="campaigns", blank=True)
-    segments = models.ManyToManyField("contacts.Segment", related_name="campaigns", blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    # For an AB_TEST campaign, `subject`/`template` above are kept mirroring
+    # Version A (see ab_testing.services.set_campaign_variants) so every
+    # existing subject/template-dependent code path (dashboard list,
+    # "duplicate", PDF reports, the default single-version test-send) keeps
+    # working unmodified. The actual per-variant content lives on
+    # ab_testing.CampaignVariant (campaign.ab_variants), and each recipient's
+    # assignment to a variant lives on CampaignRecipient.variant below.
+    campaign_type = models.CharField(max_length=20, choices=CampaignType.choices, default=CampaignType.NORMAL)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="campaigns")
     brevo_campaign_id = models.CharField(max_length=100, blank=True, null=True)
     sent_at = models.DateTimeField(null=True, blank=True)
@@ -38,34 +49,17 @@ class Campaign(TimeStampedModel):
     def recipient_count(self):
         return self.recipients.count()
 
-    def eligible_contacts_queryset(self):
-        """
-        Active, non-suppressed contacts from EITHER the campaign's selected
-        static lists OR its selected dynamic segments (see contacts.models.
-        Segment) — a contact only needs to match one of the two audience
-        sources, not both, to be included.
-        """
-        from django.db.models import Q
+    @property
+    def is_ab_test(self):
+        return self.campaign_type == self.CampaignType.AB_TEST
 
+    def eligible_contacts_queryset(self):
+        """Contacts from the campaign's selected lists that are not suppressed."""
         from contacts.models import Contact as ContactModel  # local import avoids circulars
         from contacts.services_suppression import filter_out_suppressed
 
-        list_ids = list(self.contact_lists.values_list("id", flat=True))
-        segment_contact_ids = set()
-        for segment in self.segments.all():
-            segment_contact_ids.update(segment.matching_contacts_queryset().values_list("id", flat=True))
-
-        if not list_ids and not segment_contact_ids:
-            return ContactModel.objects.none()
-
-        audience_filter = Q()
-        if list_ids:
-            audience_filter |= Q(lists__id__in=list_ids)
-        if segment_contact_ids:
-            audience_filter |= Q(id__in=segment_contact_ids)
-
         contact_ids = ContactModel.objects.filter(
-            audience_filter, status=ContactModel.Status.ACTIVE
+            lists__in=self.contact_lists.all(), status=ContactModel.Status.ACTIVE
         ).distinct()
         return filter_out_suppressed(contact_ids)
 
@@ -87,6 +81,17 @@ class CampaignRecipient(TimeStampedModel):
     contact = models.ForeignKey(Contact, on_delete=models.CASCADE, related_name="campaign_recipients")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     sent_at = models.DateTimeField(null=True, blank=True)
+    # Which A/B variant this contact was assigned to, for an AB_TEST
+    # campaign (null for a normal campaign, and null until
+    # ab_testing.services.assign_unassigned_recipients has run). This IS
+    # the audience-split assignment record -- see ab_testing/models.py's
+    # module docstring for why a separate "ABTestContactAssignment" model
+    # would only duplicate the guarantee this row + unique_together below
+    # already provides (one row per (campaign, contact) -> at most one
+    # variant per contact per campaign).
+    variant = models.ForeignKey(
+        "ab_testing.CampaignVariant", on_delete=models.SET_NULL, null=True, blank=True, related_name="recipients"
+    )
 
     class Meta:
         unique_together = ("campaign", "contact")

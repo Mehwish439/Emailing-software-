@@ -35,8 +35,10 @@ export async function previewCampaign(id) {
   return data;
 }
 
-export async function sendTestEmail(id, testEmail) {
-  const { data } = await api.post(`/campaigns/${id}/test/`, { test_email: testEmail });
+export async function sendTestEmail(id, testEmail, variant) {
+  const payload = { test_email: testEmail };
+  if (variant) payload.variant = variant;
+  const { data } = await api.post(`/campaigns/${id}/test/`, payload);
   return data;
 }
 
@@ -52,6 +54,28 @@ export async function getCampaignStatistics(id) {
 
 export async function getCampaignRecipients(id, params = {}) {
   const { data } = await api.get(`/campaigns/${id}/recipients/`, { params });
+  return data;
+}
+
+// -- A/B Testing --------------------------------------------------------
+
+export async function getCampaignVariants(id) {
+  const { data } = await api.get(`/campaigns/${id}/ab-variants/`);
+  return data;
+}
+
+export async function setCampaignVariants(id, variants) {
+  const { data } = await api.put(`/campaigns/${id}/ab-variants/`, { variants });
+  return data;
+}
+
+export async function getCampaignAbResults(id) {
+  const { data } = await api.get(`/campaigns/${id}/ab-results/`);
+  return data;
+}
+
+export async function previewCampaignVariant(id, variant) {
+  const { data } = await api.get(`/campaigns/${id}/preview/`, { params: { variant } });
   return data;
 }
 

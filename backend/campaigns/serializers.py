@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from contacts.models import ContactList, Segment
+from contacts.models import ContactList
 from email_templates.models import EmailTemplate
 
 from .models import Campaign, CampaignRecipient
@@ -20,28 +20,40 @@ class CampaignSerializer(serializers.ModelSerializer):
     recipient_count = serializers.IntegerField(read_only=True)
     template_name = serializers.CharField(source="template.name", read_only=True)
     eligible_recipient_count = serializers.SerializerMethodField()
-    segments = serializers.PrimaryKeyRelatedField(many=True, queryset=Segment.objects.none(), required=False)
+    ab_variants = serializers.SerializerMethodField()
 
     class Meta:
         model = Campaign
         fields = [
             "id", "name", "subject", "sender_name", "sender_email", "template", "template_name",
-            "contact_lists", "segments", "status", "brevo_campaign_id", "recipient_count", "eligible_recipient_count",
-            "created_by", "created_at", "updated_at", "sent_at", "failure_reason",
+            "contact_lists", "status", "campaign_type", "ab_variants", "brevo_campaign_id", "recipient_count",
+            "eligible_recipient_count", "created_by", "created_at", "updated_at", "sent_at", "failure_reason",
         ]
         read_only_fields = ["id", "status", "brevo_campaign_id", "created_by", "created_at", "updated_at", "sent_at", "failure_reason"]
+
+    def get_ab_variants(self, obj):
+        # Read-only convenience so the frontend can fetch a campaign and
+        # immediately see its configured variants (if any) without a
+        # second request -- variants are still created/edited exclusively
+        # through PUT /api/campaigns/{id}/ab-variants/ (see ab_testing.views),
+        # not through this serializer, since that's where all the A/B
+        # validation (both variants required, split == 100%, etc.) lives.
+        if not obj.pk or obj.campaign_type != Campaign.CampaignType.AB_TEST:
+            return []
+        from ab_testing.serializers import CampaignVariantSerializer
+
+        return CampaignVariantSerializer(obj.ab_variants.all(), many=True).data
 
     def get_eligible_recipient_count(self, obj):
         """
         A live preview of how many contacts would actually be sent to right
-        now — computed from the campaign's selected lists AND segments,
-        filtered to active and non-suppressed contacts — the same logic
-        send_campaign_now() uses to build the real recipient snapshot.
-        Unlike recipient_count (which only reflects CampaignRecipient rows
-        that already exist, i.e. only after a send has been attempted),
-        this updates live as contact_lists/segments change, so it's what to
-        check *before* sending to confirm the audience selection actually
-        has eligible contacts in it.
+        now — computed from the campaign's selected lists, filtered to active
+        and non-suppressed contacts — the same logic send_campaign_now() uses
+        to build the real recipient snapshot. Unlike recipient_count (which
+        only reflects CampaignRecipient rows that already exist, i.e. only
+        after a send has been attempted), this updates live as contact_lists
+        changes, so it's what to check *before* sending to confirm the list
+        selection actually has eligible contacts in it.
         """
         if not obj.pk:
             return 0
@@ -53,7 +65,6 @@ class CampaignSerializer(serializers.ModelSerializer):
         if request and request.user and request.user.is_authenticated:
             self.fields["template"].queryset = EmailTemplate.objects.filter(created_by=request.user)
             self.fields["contact_lists"].queryset = ContactList.objects.filter(owner=request.user)
-            self.fields["segments"].queryset = Segment.objects.filter(owner=request.user)
 
     def validate(self, attrs):
         # On update, only draft campaigns may be freely edited.
@@ -66,6 +77,11 @@ class CampaignSerializer(serializers.ModelSerializer):
 
 class SendTestEmailSerializer(serializers.Serializer):
     test_email = serializers.EmailField()
+    # Optional -- only meaningful for an A/B test campaign, to test-send
+    # one specific version's content instead of the campaign's default
+    # (Version A-mirrored) subject/template. Omitted/blank for a normal
+    # campaign's test send, which behaves exactly as before.
+    variant = serializers.ChoiceField(choices=["A", "B"], required=False, allow_null=True)
 
 
 class CampaignAnalyticsSerializer(serializers.Serializer):

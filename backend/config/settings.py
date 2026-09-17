@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     "scheduling",
     "brevo",
     "analytics",
+    "ab_testing",
 ]
 
 MIDDLEWARE = [

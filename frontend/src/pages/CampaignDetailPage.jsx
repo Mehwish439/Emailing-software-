@@ -12,6 +12,7 @@ import { getCampaignAnalytics } from "../services/analyticsService";
 import {
   downloadCampaignReportPdf,
   getCampaign,
+  getCampaignAbResults,
   getCampaignRecipients,
   sendCampaignNow,
   sendTestEmail,
@@ -32,6 +33,7 @@ export default function CampaignDetailPage() {
 
   const [campaign, setCampaign] = useState(null);
   const [analytics, setAnalytics] = useState(null);
+  const [abResults, setAbResults] = useState(null);
   const [recipients, setRecipients] = useState([]);
   const [recipientsPage, setRecipientsPage] = useState(1);
   const [recipientsHasMore, setRecipientsHasMore] = useState(false);
@@ -86,6 +88,9 @@ export default function CampaignDetailPage() {
 
       if (campaignData.status !== "draft") {
         getCampaignAnalytics(id).then(setAnalytics).catch(() => {});
+        if (campaignData.campaign_type === "ab_test") {
+          getCampaignAbResults(id).then(setAbResults).catch(() => {});
+        }
       }
       if (["scheduled", "processing"].includes(campaignData.status) && schedulesData) {
         const active = (schedulesData.results || schedulesData || []).find(
@@ -330,6 +335,55 @@ export default function CampaignDetailPage() {
             </div>
           )}
         </>
+      )}
+
+      {abResults && abResults.length > 0 && (
+        <div className="card">
+          <div className="px-5 py-4 border-b border-slate-200">
+            <h2 className="text-sm font-semibold text-slate-900">A/B Test Results</h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Computed from actual tracked deliveries/opens/clicks for each version's recipients.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
+                  <th className="px-5 py-3"> </th>
+                  {abResults.map((r) => (
+                    <th key={r.variant} className="px-5 py-3">
+                      Version {r.variant} <span className="text-slate-400 font-normal">({r.split_percentage}%)</span>
+                      <p className="mt-0.5 text-slate-400 font-normal truncate max-w-[200px]" title={r.variant_subject}>
+                        "{r.variant_subject}"
+                      </p>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {[
+                  ["Sent", (r) => r.sent],
+                  ["Delivered", (r) => r.delivered],
+                  ["Opened", (r) => r.opened],
+                  ["Open Rate", (r) => `${r.open_rate}%`],
+                  ["Clicked", (r) => r.clicked],
+                  ["Click Rate", (r) => `${r.click_rate}%`],
+                  ["Bounced", (r) => r.soft_bounced + r.hard_bounced],
+                  ["Unsubscribed", (r) => r.unsubscribed],
+                ].map(([label, getValue]) => (
+                  <tr key={label}>
+                    <td className="px-5 py-2.5 font-medium text-slate-700">{label}</td>
+                    {abResults.map((r) => (
+                      <td key={r.variant} className="px-5 py-2.5 text-slate-900">
+                        {getValue(r)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       <div className="card">

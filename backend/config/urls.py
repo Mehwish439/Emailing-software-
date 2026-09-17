@@ -11,6 +11,7 @@ urlpatterns = [
     path("api/", include("contacts.urls")),
     path("api/", include("email_templates.urls")),
     path("api/", include("campaigns.urls")),
+    path("api/", include("ab_testing.urls")),
     path("api/", include("scheduling.urls")),
     path("api/", include("analytics.urls")),
     path("api/brevo/", include("brevo.urls")),
