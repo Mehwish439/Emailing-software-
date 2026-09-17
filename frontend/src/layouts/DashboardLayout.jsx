@@ -14,6 +14,7 @@ const NAV_SECTIONS = [
       { label: "Lists", to: "/contacts/lists", icon: "list" },
       { label: "Tags", to: "/contacts/tags", icon: "tag" },
       { label: "Segments", to: "/contacts/segments", icon: "filter" },
+      { label: "Signup Forms", to: "/contacts/signup-forms", icon: "form" }, // NEW (Signup Forms feature)
     ],
   },
   {
@@ -47,6 +48,15 @@ const ICONS = {
   ),
   filter: (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 4h18l-7 9v6l-4 2v-8L3 4z" />
+  ),
+  // NEW (Signup Forms feature)
+  form: (
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.75}
+      d="M9 12h6m-6 4h6M9 8h1M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"
+    />
   ),
   send: (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />

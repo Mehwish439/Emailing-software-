@@ -17,6 +17,7 @@ import RegisterPage from "./pages/RegisterPage";
 import ScheduledCampaignsPage from "./pages/ScheduledCampaignsPage";
 import SegmentsPage from "./pages/SegmentsPage";
 import SettingsPage from "./pages/SettingsPage";
+import SignupFormsPage from "./pages/SignupFormsPage"; // NEW (Signup Forms feature)
 import TagsPage from "./pages/TagsPage";
 import TemplateEditorPage from "./pages/TemplateEditorPage";
 import TemplatesPage from "./pages/TemplatesPage";
@@ -61,6 +62,7 @@ function AppRoutes() {
         <Route path="/contacts/lists" element={<ContactListsPage />} />
         <Route path="/contacts/tags" element={<TagsPage />} />
         <Route path="/contacts/segments" element={<SegmentsPage />} />
+        <Route path="/contacts/signup-forms" element={<SignupFormsPage />} /> {/* NEW (Signup Forms feature) */}
 
         <Route path="/templates" element={<TemplatesPage />} />
         <Route path="/templates/create" element={<TemplateEditorPage />} />

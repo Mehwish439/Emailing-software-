@@ -70,6 +70,7 @@ INSTALLED_APPS = [
     "brevo",
     "analytics",
     "ab_testing",
+    "signup_forms",  # NEW (Signup Forms feature)
 ]
 
 MIDDLEWARE = [
@@ -245,6 +246,13 @@ REST_FRAMEWORK = {
         "webhook": "600/minute",
         "auth": "20/minute",
         "cron": "120/minute",
+        # NEW (Signup Forms feature) — per-IP limits on the two public,
+        # unauthenticated signup-form endpoints (see signup_forms/views.py).
+        # "signup-form" (viewing a form) is looser than "signup-form-submit"
+        # (actually creating/updating a contact), matching how a page load
+        # naturally happens more often than a form submit.
+        "signup-form": "120/minute",
+        "signup-form-submit": "20/minute",
     },
 
     # Exception handling
