@@ -141,6 +141,45 @@ def send_to_recipient(campaign, recipient):
     )
 
 
+def send_automation_email(automation, step, execution, contact):
+    """
+    Sends ONE Marketing Automation email through the same Brevo client/config as campaigns.
+    Returns Brevo's response payload (contains "messageId"); raises BrevoAPIError on failure so the
+    automation engine (automations/services.py) can log it and decide whether to retry.
+
+    - Sender: automation.sender_name/sender_email if set, else the existing BREVO_SENDER_* settings.
+    - Subject: step.configuration["subject"] if set, else the template's own subject.
+    - Same {{merge tags}}, working {{unsubscribe_url}} and List-Unsubscribe headers as campaigns
+      (the unsubscribe token has no campaign id; contacts/views.py handles that already).
+    - Tagged/headed with automation ids so brevo/webhooks.py can attribute delivery/open/click/
+      bounce/unsubscribe events back to the execution.
+    """
+    client = BrevoClient()
+    template = step.email_template
+    unsubscribe_url = _build_unsubscribe_url(contact.id)
+    subject_source = (step.configuration or {}).get("subject") or template.subject
+    subject, html_content = render_template_for_contact(
+        subject_source, template.html_content, contact, extra_fields={"unsubscribe_url": unsubscribe_url},
+    )
+    sender = {
+        "name": automation.sender_name or settings.BREVO_SENDER_NAME,
+        "email": automation.sender_email or settings.BREVO_SENDER_EMAIL,
+    }
+    return client.send_transactional_email(
+        sender=sender,
+        to=[{"email": contact.email, "name": contact.full_name}],
+        subject=subject,
+        html_content=html_content,
+        tags=[f"automation-{automation.id}", f"automation-exec-{execution.id}"],
+        headers={
+            "X-Automation-Id": str(automation.id),
+            "X-Automation-Execution-Id": str(execution.id),
+            "List-Unsubscribe": f"<{unsubscribe_url}>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
+    )
+
+
 def create_and_send_campaign_via_brevo(campaign):
     """
     Alternative path: registers the campaign as a native Brevo Email Campaign

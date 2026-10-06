@@ -27,6 +27,13 @@ def emit_contact_signup_event(contact, form):
     """
     logger.info("contact_signup event: contact_id=%s form_id=%s owner_id=%s", contact.id, form.id, form.owner_id)
 
+    # Marketing Automation: enroll the contact into any ACTIVE "Signup form submitted" automation
+    # for this form. Never raises (see automations/triggers.py) and runs the zero-delay first step
+    # only AFTER this transaction commits, so a Brevo hiccup can't fail or slow the signup itself.
+    from automations.triggers import handle_signup_form_submitted
+
+    handle_signup_form_submitted(contact, form)
+
 
 @transaction.atomic
 def submit_signup_form(form, *, email, first_name="", last_name=""):

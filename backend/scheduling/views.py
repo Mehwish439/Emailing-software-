@@ -12,7 +12,9 @@ from common.exceptions import ValidationAppError
 
 from .models import ScheduledCampaign
 from .serializers import CreateScheduleSerializer, ScheduledCampaignSerializer, UpdateScheduleSerializer
-from .services import cancel_schedule, create_schedule, process_due_schedules, update_schedule
+from .services import (
+    cancel_schedule, create_schedule, process_due_automation_steps, process_due_schedules, update_schedule,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +122,9 @@ def process_due_schedules_view(request):
 
     logger.info("process-due: authorized request received from %s", request.META.get("REMOTE_ADDR"))
     results = process_due_schedules()
-    return Response({"processed": len(results), "results": results})
+    # NEW (Marketing Automation): same cron call also runs due automation steps.
+    automation_summary = process_due_automation_steps()
+    return Response({"processed": len(results), "results": results, "automations": automation_summary})
 
 
 process_due_schedules_view.cls.throttle_scope = "cron"

@@ -226,3 +226,21 @@ def process_due_schedules():
     else:
         logger.info("process_due_schedules: run finished, processed %s schedule(s)", len(results))
     return results
+
+
+def process_due_automation_steps():
+    """
+    Marketing Automation hook for the SAME cron entry point as campaign scheduling
+    (POST /api/scheduling/process-due/ and `manage.py process_scheduled_campaigns`).
+
+    Kept separate from process_due_schedules() so that function's return shape (a list of campaign
+    results) is unchanged. Isolated in try/except: an automation problem can never break campaign
+    sending, and a campaign problem never stops automations (the callers run it unconditionally).
+    """
+    from automations.services import process_due_automations
+
+    try:
+        return process_due_automations()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("process_due_automation_steps failed")
+        return {"processed": 0, "sent": 0, "failed": 0, "cancelled": 0, "completed": 0, "results": [], "error": str(exc)[:500]}

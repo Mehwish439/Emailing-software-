@@ -71,6 +71,7 @@ INSTALLED_APPS = [
     "analytics",
     "ab_testing",
     "signup_forms",  # NEW (Signup Forms feature)
+    "automations",  # NEW (Marketing Automation feature)
 ]
 
 MIDDLEWARE = [
@@ -253,6 +254,8 @@ REST_FRAMEWORK = {
         # naturally happens more often than a form submit.
         "signup-form": "120/minute",
         "signup-form-submit": "20/minute",
+        # NEW (Marketing Automation) — external event intake (POST /api/automations/events/)
+        "automation-events": "120/minute",
     },
 
     # Exception handling
@@ -328,6 +331,22 @@ BREVO_SENDER_EMAIL = os.getenv(
 # external scheduler such as cron-job.org. Required in production; leaving
 # it unset only works while DEBUG=True (local development).
 CRON_SECRET = os.getenv("CRON_SECRET", "")
+
+# ---------------------------------------------------------------------------
+# Marketing Automation (NEW) — all optional, sensible defaults
+# ---------------------------------------------------------------------------
+# Max automation steps processed per /api/scheduling/process-due/ call, and a wall-clock budget
+# (seconds) so a run stays well under gunicorn's --timeout 30. Anything left over is simply picked
+# up by the next cron tick.
+AUTOMATION_BATCH_SIZE = int(os.getenv("AUTOMATION_BATCH_SIZE", "50"))
+AUTOMATION_RUN_TIME_BUDGET_SECONDS = int(os.getenv("AUTOMATION_RUN_TIME_BUDGET_SECONDS", "20"))
+# A claimed enrollment older than this is treated as abandoned by a crashed worker.
+AUTOMATION_LOCK_LEASE_SECONDS = int(os.getenv("AUTOMATION_LOCK_LEASE_SECONDS", "300"))
+# A failed step is retried up to this many attempts, waiting RETRY_DELAY_MINUTES * attempt between.
+AUTOMATION_MAX_STEP_ATTEMPTS = int(os.getenv("AUTOMATION_MAX_STEP_ATTEMPTS", "3"))
+AUTOMATION_RETRY_DELAY_MINUTES = int(os.getenv("AUTOMATION_RETRY_DELAY_MINUTES", "15"))
+# Run a zero-delay first step right after a signup commits (set False to leave it all to cron).
+AUTOMATION_RUN_FIRST_STEP_INLINE = env_bool("AUTOMATION_RUN_FIRST_STEP_INLINE", True)
 
 # How many recipients a single call to campaigns.services.send_campaign_now()
 # will actually send, per campaign. Chosen with real headroom under

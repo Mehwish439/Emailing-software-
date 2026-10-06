@@ -43,7 +43,7 @@ claim/send/finalize logic — this command is just a thin wrapper around it.
 """
 from django.core.management.base import BaseCommand
 
-from scheduling.services import process_due_schedules
+from scheduling.services import process_due_automation_steps, process_due_schedules
 
 
 class Command(BaseCommand):
@@ -51,6 +51,12 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         results = process_due_schedules()
+        # NEW (Marketing Automation): also run due automation steps on every cron tick.
+        automation_summary = process_due_automation_steps()
+        self.stdout.write(
+            f"process_scheduled_campaigns: automations processed={automation_summary['processed']} "
+            f"sent={automation_summary['sent']} failed={automation_summary['failed']}."
+        )
 
         if not results:
             self.stdout.write("process_scheduled_campaigns: no due schedules found.")

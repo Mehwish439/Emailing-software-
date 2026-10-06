@@ -5,6 +5,9 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
 import DashboardLayout from "./layouts/DashboardLayout";
 import AnalyticsPage from "./pages/AnalyticsPage";
+import AutomationBuilderPage from "./pages/AutomationBuilderPage"; // NEW (Marketing Automation)
+import AutomationDetailPage from "./pages/AutomationDetailPage"; // NEW (Marketing Automation)
+import AutomationsPage from "./pages/AutomationsPage"; // NEW (Marketing Automation)
 import CampaignCreatePage from "./pages/CampaignCreatePage";
 import CampaignDetailPage from "./pages/CampaignDetailPage";
 import CampaignEditPage from "./pages/CampaignEditPage";
@@ -63,6 +66,12 @@ function AppRoutes() {
         <Route path="/contacts/tags" element={<TagsPage />} />
         <Route path="/contacts/segments" element={<SegmentsPage />} />
         <Route path="/contacts/signup-forms" element={<SignupFormsPage />} /> {/* NEW (Signup Forms feature) */}
+
+        {/* NEW (Marketing Automation) */}
+        <Route path="/automations" element={<AutomationsPage />} />
+        <Route path="/automations/create" element={<AutomationBuilderPage />} />
+        <Route path="/automations/:id" element={<AutomationDetailPage />} />
+        <Route path="/automations/:id/edit" element={<AutomationBuilderPage />} />
 
         <Route path="/templates" element={<TemplatesPage />} />
         <Route path="/templates/create" element={<TemplateEditorPage />} />

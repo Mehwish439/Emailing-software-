@@ -25,6 +25,11 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    // NEW (Marketing Automation)
+    title: "Automation",
+    items: [{ label: "Marketing Automation", to: "/automations", icon: "bolt" }],
+  },
+  {
     items: [
       { label: "Templates", to: "/templates", icon: "template" },
       { label: "Analytics", to: "/analytics", icon: "chart" },
@@ -57,6 +62,10 @@ const ICONS = {
       strokeWidth={1.75}
       d="M9 12h6m-6 4h6M9 8h1M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"
     />
+  ),
+  // NEW (Marketing Automation)
+  bolt: (
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M13 10V3L4 14h7v7l9-11h-7z" />
   ),
   send: (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />

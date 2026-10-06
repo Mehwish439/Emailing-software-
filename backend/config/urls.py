@@ -16,4 +16,5 @@ urlpatterns = [
     path("api/", include("analytics.urls")),
     path("api/brevo/", include("brevo.urls")),
     path("api/", include("signup_forms.urls")),  # NEW (Signup Forms feature)
+    path("api/", include("automations.urls")),  # NEW (Marketing Automation feature)
 ]

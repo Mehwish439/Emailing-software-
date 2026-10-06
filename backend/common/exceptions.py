@@ -1,6 +1,7 @@
 import logging
 
 from django.db import DatabaseError
+from django.db.models import ProtectedError
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
@@ -55,6 +56,13 @@ def custom_exception_handler(exc, context):
 
     if isinstance(exc, ValidationAppError):
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    if isinstance(exc, ProtectedError):
+        # e.g. deleting an email template that a campaign or automation step still uses
+        return Response(
+            {"detail": "This item can't be deleted because it is still in use by a campaign or automation."},
+            status=status.HTTP_409_CONFLICT,
+        )
 
     if isinstance(exc, DatabaseError):
         logger.exception("Infrastructure error")

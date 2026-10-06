@@ -137,6 +137,14 @@ def process_webhook_event(payload: dict):
     campaign_id = _extract_campaign_id(payload)
     campaign = Campaign.objects.filter(id=campaign_id).first() if campaign_id else None
     if campaign is None:
+        # Marketing Automation emails carry automation headers/tags instead of a campaign id.
+        # Handle them here (stats + suppression + cancelling that contact's enrollments) rather
+        # than dropping the event — a hard bounce / unsubscribe must still suppress the email.
+        from automations.services import handle_automation_webhook
+
+        automation_outcome = handle_automation_webhook(payload, internal_event, email, _extract_timestamp(payload))
+        if automation_outcome is not None:
+            return automation_outcome
         logger.warning("Webhook event for unknown/missing campaign_id=%s email=%s", campaign_id, email)
         return "ignored-unknown-campaign"
 
