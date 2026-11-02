@@ -83,61 +83,27 @@ def send_test_email(campaign, test_email, variant=None):
 
 def send_to_recipient(campaign, recipient):
     """
-    Sends the campaign email to a single CampaignRecipient via Brevo's
-    transactional endpoint. Returns the Brevo response payload.
-    Raises BrevoAPIError on failure so the caller (campaigns.services) can retry.
+    Sends the campaign email to a single CampaignRecipient via Brevo's transactional
+    endpoint. Returns the Brevo response payload; raises BrevoAPIError on failure.
 
-    Every send:
-      - renders {{variable}} merge tags (subject and HTML) using that
-        contact's own imported data (see email_templates/rendering.py), so
-        every contact gets their own values, never raw {{...}} text
-      - includes a real {{unsubscribe_url}} substitution, so a template's
-        visible "Unsubscribe" link (see the template editor's "Insert
-        unsubscribe link" button) actually works per-recipient
-      - includes List-Unsubscribe / List-Unsubscribe-Post headers (RFC 8058),
-        so mailbox providers can offer one-click unsubscribe directly in
-        their UI. This also meaningfully helps inbox placement — bulk mail
-        sent without these headers is one of the more common reasons
-        mailbox providers route messages to spam.
-
-    For an A/B test campaign, `recipient.variant` (set by
-    ab_testing.services.assign_unassigned_recipients before this ever
-    runs) picks which version's subject/template is actually sent —
-    falling back to the campaign's own subject/template (unchanged
-    behavior) whenever recipient.variant is None, i.e. every normal
-    campaign, exactly as before.
+    The email itself (merge tags, per-recipient unsubscribe URL, List-Unsubscribe headers,
+    A/B variant selection) is now produced by providers.builder.build_campaign_email so the
+    Brevo and self-hosted SMTP providers share one implementation of that logic. Behaviour
+    for Brevo is unchanged. NOTE: campaigns.services no longer calls this directly -- it goes
+    through providers.dispatch (idempotency, quota, provider selection); this function stays
+    for backward compatibility and direct use.
     """
+    from providers.builder import build_campaign_email
+
     client = BrevoClient()
-    contact = recipient.contact
-    variant = recipient.variant
-    unsubscribe_url = _build_unsubscribe_url(contact.id, campaign.id)
-    subject_source = variant.subject if variant else campaign.subject
-    html_source = variant.template.html_content if variant else campaign.template.html_content
-    subject, html_content = render_template_for_contact(
-        subject_source,
-        html_source,
-        contact,
-        extra_fields={"unsubscribe_url": unsubscribe_url},
-    )
-
-    tags = [f"campaign-{campaign.id}"]
-    headers = {
-        "X-Campaign-Id": str(campaign.id),
-        "X-Recipient-Id": str(recipient.id),
-        "List-Unsubscribe": f"<{unsubscribe_url}>",
-        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-    }
-    if variant:
-        tags.append(f"ab-variant-{variant.label}")
-        headers["X-AB-Variant"] = variant.label
-
+    email = build_campaign_email(campaign, recipient)
     return client.send_transactional_email(
-        sender=_sender_payload(campaign),
-        to=[{"email": contact.email, "name": contact.full_name}],
-        subject=subject,
-        html_content=html_content,
-        tags=tags,
-        headers=headers,
+        sender={"name": email.sender_name, "email": email.sender_email},
+        to=[{"email": email.to_email, "name": email.to_name}],
+        subject=email.subject,
+        html_content=email.html,
+        tags=email.tags,
+        headers=email.headers,
     )
 
 

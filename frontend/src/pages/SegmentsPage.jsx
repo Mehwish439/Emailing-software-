@@ -14,6 +14,7 @@ import {
   listTags,
   updateSegment,
 } from "../services/contactService";
+import { formatApiError } from "../utils/formatError";
 
 const emptyForm = { name: "", description: "", tags: [], lists: [], status: "", tag_match: "any" };
 
@@ -105,7 +106,7 @@ export default function SegmentsPage() {
       setFormOpen(false);
       load();
     } catch (err) {
-      const detail = err.response?.data?.non_field_errors?.[0] || err.response?.data?.name?.[0] || "Failed to save segment.";
+      const detail = formatApiError(err, "Failed to save segment.");
       showToast(detail, "error");
     } finally {
       setSaving(false);

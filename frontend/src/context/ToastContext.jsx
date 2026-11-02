@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useState } from "react";
 
+import { toDisplayText } from "../utils/formatError";
+
 const ToastContext = createContext(null);
 
 let idCounter = 0;
@@ -14,7 +16,7 @@ export function ToastProvider({ children }) {
   const showToast = useCallback(
     (message, type = "success") => {
       const id = ++idCounter;
-      setToasts((prev) => [...prev, { id, message, type }]);
+      setToasts((prev) => [...prev, { id, message: toDisplayText(message, "Something went wrong."), type }]);
       setTimeout(() => dismiss(id), 4000);
     },
     [dismiss]

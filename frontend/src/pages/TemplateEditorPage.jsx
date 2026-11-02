@@ -12,6 +12,7 @@ import {
   updateTemplate,
   uploadTemplateImage,
 } from "../services/templateService";
+import { formatApiError } from "../utils/formatError";
 
 const UNSUBSCRIBE_SNIPPET = `<p style="font-size:12px;color:#94a3b8;text-align:center;margin-top:32px;">
   Don't want these emails? <a href="{{unsubscribe_url}}" style="color:#94a3b8;text-decoration:underline;">Unsubscribe</a>
@@ -83,7 +84,7 @@ export default function TemplateEditorPage() {
       }
       navigate("/templates");
     } catch (err) {
-      showToast(err.response?.data?.html_content?.[0] || "Failed to save template.", "error");
+      showToast(formatApiError(err, "Failed to save template."), "error");
     } finally {
       setSaving(false);
     }
@@ -158,7 +159,7 @@ export default function TemplateEditorPage() {
       showToast("Image uploaded and inserted.", "success");
       setImageModalOpen(false);
     } catch (err) {
-      showToast(err.response?.data?.detail || "Failed to upload image.", "error");
+      showToast(formatApiError(err, "Failed to upload image."), "error");
     } finally {
       setUploadingImage(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -416,7 +417,6 @@ export default function TemplateEditorPage() {
               {imageUrl.trim() && (
                 <div className="rounded-lg border border-slate-200 p-2">
                   <p className="text-xs text-slate-400 mb-1">Preview</p>
-                  {/* eslint-disable-next-line jsx-a11y/alt-text */}
                   <img src={imageUrl} alt={imageAlt || "Preview"} className="max-w-full max-h-40 object-contain mx-auto" />
                 </div>
               )}

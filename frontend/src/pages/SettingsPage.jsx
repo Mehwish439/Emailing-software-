@@ -3,6 +3,8 @@ import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { updateProfile } from "../services/authService";
+import { formatApiError } from "../utils/formatError";
+import { ROLE_LABELS } from "../utils/roles";
 
 export default function SettingsPage() {
   const { user, setUser } = useAuth();
@@ -21,8 +23,8 @@ export default function SettingsPage() {
       const updated = await updateProfile(form);
       setUser(updated);
       showToast("Profile updated.", "success");
-    } catch {
-      showToast("Failed to update profile.", "error");
+    } catch (err) {
+      showToast(formatApiError(err, "Failed to update profile."), "error");
     } finally {
       setSaving(false);
     }
@@ -33,6 +35,11 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Settings</h1>
         <p className="text-sm text-slate-500">Manage your account details.</p>
+      </div>
+
+      <div className="card p-4 text-sm text-slate-600">
+        Role: <b>{ROLE_LABELS[user?.role] || "User"}</b>{user?.company ? <> · Company: <b>{user.company.name}</b></> : null}
+        <p className="text-xs text-slate-400 mt-1">Role, company and quotas are managed by your administrators.</p>
       </div>
 
       <form className="card p-6 space-y-4" onSubmit={handleSubmit}>

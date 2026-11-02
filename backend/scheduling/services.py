@@ -225,6 +225,12 @@ def process_due_schedules():
         )
     else:
         logger.info("process_due_schedules: run finished, processed %s schedule(s)", len(results))
+    try:  # monitoring heartbeat (cron or Celery) -- must never affect processing
+        from tenancy.jobs import beat
+
+        beat("process_due_schedules", "ok", f"{len(results)} item(s)")
+    except Exception:  # noqa: BLE001
+        logger.exception("heartbeat failed")
     return results
 
 

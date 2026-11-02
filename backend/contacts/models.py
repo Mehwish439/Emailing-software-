@@ -153,6 +153,7 @@ class Suppression(TimeStampedModel):
         HARD_BOUNCE = "hard_bounce", "Hard bounce"
         BLOCKED = "blocked", "Blocked"
         SPAM_COMPLAINT = "spam_complaint", "Spam complaint"
+        SOFT_BOUNCE_LIMIT = "soft_bounce_limit", "Repeated soft bounces"
         MANUAL = "manual", "Manually suppressed"
 
     email = models.EmailField(unique=True)

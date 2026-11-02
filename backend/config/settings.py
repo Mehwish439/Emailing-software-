@@ -3,6 +3,7 @@ Django settings for the Email Campaign Management Platform.
 All sensitive/configurable values are pulled from environment variables (.env).
 """
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -28,6 +29,16 @@ def env_list(name, default=""):
 SECRET_KEY = os.getenv("SECRET_KEY", "insecure-dev-key-change-me")
 DEBUG = env_bool("DEBUG", True)
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
+
+# Refuse to boot in production with the well-known development key (sessions/tokens would be forgeable).
+if not DEBUG and SECRET_KEY == "insecure-dev-key-change-me":
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured("SECRET_KEY must be set to a long random value when DEBUG is False.")
+
+# Self-service sign-up creates a standalone account (no company, NO quota = unlimited). Set to False on a
+# multi-tenant deployment where accounts must come from invitations only.
+ALLOW_PUBLIC_REGISTRATION = env_bool("ALLOW_PUBLIC_REGISTRATION", True)
 
 # Render sets RENDER_EXTERNAL_HOSTNAME automatically on every web service
 # (e.g. "your-app.onrender.com") — trust it without needing to hardcode it
@@ -72,6 +83,8 @@ INSTALLED_APPS = [
     "ab_testing",
     "signup_forms",  # NEW (Signup Forms feature)
     "automations",  # NEW (Marketing Automation feature)
+    "tenancy",      # NEW (companies, plans, quota ledger, audit log)
+    "providers",    # NEW (pluggable email providers: Brevo + self-hosted SMTP)
 ]
 
 MIDDLEWARE = [
@@ -195,21 +208,25 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # ---------------------------------------------------------------------------
 # CORS / CSRF
 # ---------------------------------------------------------------------------
-CORS_ALLOWED_ORIGINS = env_list(
-    "CORS_ALLOWED_ORIGINS",
-    "http://localhost:5173",
-)
+def _origins(name):
+    """Normalise to scheme://host[:port] (no trailing slash/path) - a trailing slash never matches a browser Origin."""
+    return [o.rstrip("/") for o in env_list(name, "")]
 
-CORS_ALLOWED_ORIGINS = [
-    "https://emailing-software-1.onrender.com",
-]
+
+# Browsers send Origin as scheme://host:port with NO path. Exactly the origins listed here get
+# Access-Control-Allow-Origin. Set CORS_ALLOWED_ORIGINS (comma-separated) in the backend .env.
+CORS_ALLOWED_ORIGINS = _origins("CORS_ALLOWED_ORIGINS")
+if not CORS_ALLOWED_ORIGINS and os.getenv("FRONTEND_URL"):
+    CORS_ALLOWED_ORIGINS = [os.environ["FRONTEND_URL"].rstrip("/")]     # sensible default: the app's own frontend
+if DEBUG:
+    # Local development only: always allow the Vite dev/preview servers (never wildcard).
+    for _o in ("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://127.0.0.1:4173"):
+        if _o not in CORS_ALLOWED_ORIGINS:
+            CORS_ALLOWED_ORIGINS.append(_o)
 
 CORS_ALLOW_CREDENTIALS = True
 
-CSRF_TRUSTED_ORIGINS = env_list(
-    "CORS_ALLOWED_ORIGINS",
-    "http://localhost:5173",
-)
+CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +337,38 @@ BREVO_SENDER_EMAIL = os.getenv(
     "BREVO_SENDER_EMAIL",
     "no-reply@example.com",
 )
+# The test runner never talks to Brevo (tests mock the client); a placeholder key lets the
+# provider readiness check pass without real credentials. Never used outside `manage.py test`.
+if "test" in sys.argv and not BREVO_API_KEY:
+    BREVO_API_KEY = "test-placeholder-not-a-real-key"
+BREVO_MAX_SEND_ATTEMPTS = int(os.getenv("BREVO_MAX_SEND_ATTEMPTS", "2"))
+
+
+# ---------------------------------------------------------------------------
+# Email provider selection + self-hosted SMTP (Postfix)  (NEW)
+# ---------------------------------------------------------------------------
+# EMAIL_PROVIDER is the fallback when PlatformSettings.active_provider is unset.
+# Default "brevo" == the exact pre-upgrade behaviour.
+EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "brevo").strip().lower()
+# Use EITHER STARTTLS (port 587, SMTP_USE_TLS=True) OR implicit TLS (port 465,
+# SMTP_USE_SSL=True) -- enabling both is rejected as a configuration error.
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")          # secret: server-side only
+SMTP_USE_TLS = env_bool("SMTP_USE_TLS", True)
+SMTP_USE_SSL = env_bool("SMTP_USE_SSL", False)
+SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "20"))
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "")
+SMTP_REPLY_TO = os.getenv("SMTP_REPLY_TO", "")
+# Software-side submission cap (messages/minute) used when PlatformSettings.rate_per_minute is
+# unset. Must reflect the HOST'S written authorization, not a hoped-for number. 0 = no cap.
+SMTP_RATE_LIMIT = int(os.getenv("SMTP_RATE_LIMIT", "0"))
+SMTP_MAX_RETRIES = int(os.getenv("SMTP_MAX_RETRIES", "3"))
+# Domain whose MX points at the bounce receiver (VERP return-paths). Blank = disabled.
+SMTP_BOUNCE_DOMAIN = os.getenv("SMTP_BOUNCE_DOMAIN", "")
+# Shared secret the bounce-forwarder on the SMTP server signs requests with (HMAC-SHA256).
+SMTP_BOUNCE_WEBHOOK_SECRET = os.getenv("SMTP_BOUNCE_WEBHOOK_SECRET", "")
 
 
 # ---------------------------------------------------------------------------
@@ -436,3 +485,59 @@ LOGGING = {
         },
     },
 }
+
+# ---------------------------------------------------------------------------
+# Optional Celery / Redis (NEW). Leave CELERY_BROKER_URL blank to keep cron-driven processing.
+# ---------------------------------------------------------------------------
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "")          # e.g. redis://:password@127.0.0.1:6379/0
+CELERY_RESULT_BACKEND = None                                      # results are not needed; the DB is the record
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_TIME_LIMIT = 300
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    "process-due": {"task": "mailflow.process_due", "schedule": 60.0},
+    "reconcile-quota": {"task": "mailflow.reconcile_quota", "schedule": 600.0},
+    "smtp-health": {"task": "mailflow.smtp_health", "schedule": 300.0},
+    "review-stuck": {"task": "mailflow.review_stuck", "schedule": 300.0},
+}
+
+
+# ---------------------------------------------------------------------------
+# Invitation / password-reset emails and soft-bounce escalation
+# ---------------------------------------------------------------------------
+# Invitation and password-reset links are emailed through Brevo's transactional API when it is
+# configured (BREVO_API_KEY + BREVO_SENDER_EMAIL). They never use campaign quota. Disabled during tests.
+SEND_INVITE_EMAILS = env_bool("SEND_INVITE_EMAILS", True) and "test" not in sys.argv
+
+# A soft bounce is temporary. If an address soft-bounces this many times in a row (no successful
+# delivery event in between) within the window, it is suppressed so we stop sending to it.
+SOFT_BOUNCE_SUPPRESS_THRESHOLD = int(os.getenv("SOFT_BOUNCE_SUPPRESS_THRESHOLD", "3"))   # 0 disables escalation
+SOFT_BOUNCE_WINDOW_DAYS = int(os.getenv("SOFT_BOUNCE_WINDOW_DAYS", "30"))
+
+
+# ---------------------------------------------------------------------------
+# Production hardening (only when DEBUG is False)
+# ---------------------------------------------------------------------------
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = "same-origin"
+    # Set > 0 only once HTTPS works everywhere (e.g. 31536000); it is sticky in browsers.
+    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "0"))
+    # Off by default: platforms like Render terminate TLS at the proxy and health-check over HTTP.
+    SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", False)
+
+
+# ---------------------------------------------------------------------------
+# Self-service company sign-up (creates a Company + its first Company Admin)
+# ---------------------------------------------------------------------------
+# New companies are placed on a LIMITED trial plan. A company without a plan has no limit at all, so
+# sign-up refuses to proceed rather than create one. Edit the plan under Platform -> Plans & quotas.
+ALLOW_COMPANY_SIGNUP = env_bool("ALLOW_COMPANY_SIGNUP", True)
+TRIAL_PLAN_NAME = os.getenv("TRIAL_PLAN_NAME", "Trial")
+TRIAL_DAILY_QUOTA = int(os.getenv("TRIAL_DAILY_QUOTA", "100"))
+TRIAL_MONTHLY_QUOTA = int(os.getenv("TRIAL_MONTHLY_QUOTA", "1000"))
+TRIAL_MAX_USERS = int(os.getenv("TRIAL_MAX_USERS", "3"))

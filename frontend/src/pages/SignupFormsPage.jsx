@@ -15,6 +15,7 @@ import {
   listSignupForms,
   updateSignupForm,
 } from "../services/signupFormService";
+import { formatApiError } from "../utils/formatError";
 
 const emptyForm = {
   name: "",
@@ -107,9 +108,7 @@ export default function SignupFormsPage() {
       setFormOpen(false);
       load();
     } catch (err) {
-      const data = err.response?.data;
-      const message =
-        data?.detail || data?.name?.[0] || data?.non_field_errors?.[0] || "Failed to save signup form.";
+      const message = formatApiError(err, "Failed to save signup form.");
       setFormError(message);
     } finally {
       setSaving(false);

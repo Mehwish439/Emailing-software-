@@ -3,9 +3,11 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import Modal from "../components/Modal";
 import { useToast } from "../context/ToastContext";
+import ProviderPicker from "../components/ProviderPicker";
 import { getCampaign, updateCampaign } from "../services/campaignService";
 import { createContactList, listContactLists, listSegments } from "../services/contactService";
 import { listTemplates } from "../services/templateService";
+import { formatApiError } from "../utils/formatError";
 
 export default function CampaignEditPage() {
   const { id } = useParams();
@@ -37,6 +39,7 @@ export default function CampaignEditPage() {
         template: campaign.template,
         contact_lists: campaign.contact_lists,
         segments: campaign.segments || [],
+        requested_provider: campaign.requested_provider || "",
       });
       setTemplates(templatesData.results || []);
       setLists(listsData.results || listsData || []);
@@ -86,7 +89,7 @@ export default function CampaignEditPage() {
       showToast("Campaign updated.", "success");
       navigate(`/campaigns/${id}`);
     } catch (err) {
-      showToast(err.response?.data?.detail || "Failed to update campaign.", "error");
+      showToast(formatApiError(err, "Failed to update campaign."), "error");
     } finally {
       setSaving(false);
     }
@@ -126,6 +129,7 @@ export default function CampaignEditPage() {
             />
           </div>
         </div>
+        <ProviderPicker value={form.requested_provider} onChange={(v) => setForm({ ...form, requested_provider: v })} />
         <div>
           <label className="label">Template</label>
           <select className="input" value={form.template} onChange={(e) => setForm({ ...form, template: e.target.value })}>

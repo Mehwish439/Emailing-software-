@@ -70,8 +70,9 @@ live. Open it and run:
 
 ```bash
 python manage.py migrate
-python manage.py seed_data
 ```
+
+> Do **not** run `seed_data` on the live service: it is development-only and now refuses to run when `DEBUG=False`. Create the first platform admin as described in `LOGIN_GUIDE.md` §1.
 
 (Re-run `migrate` after any future deploy that includes new migrations —
 Render doesn't do this automatically unless you add it to the build
@@ -230,8 +231,8 @@ since every path here is safe to run concurrently with any other.
 ## 6. Verify everything
 
 - `https://<your-backend-name>.onrender.com/api/health/` → `{"status": "healthy", "database": "connected"}`
-- Frontend loads at `https://<your-frontend-name>.onrender.com`, log in with
-  the seeded demo account (`admin` / `Admin@12345`) or register a new one
+- Frontend loads at `https://<your-frontend-name>.onrender.com`, sign up at `/signup`
+  (Create a new company) or sign in with the Super Admin you created (see `LOGIN_GUIDE.md` §1)
 - Create a campaign, send a test email, confirm it arrives
 - In Supabase's SQL Editor, confirm the cron job is actually running:
   ```sql

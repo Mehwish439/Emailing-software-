@@ -10,6 +10,7 @@ import StatusBadge from "../components/StatusBadge";
 import { useToast } from "../context/ToastContext";
 import { cancelSchedule, listScheduledCampaigns, updateSchedule } from "../services/schedulingService";
 import { localDateTimeInZoneToUTC } from "../utils/timezone";
+import { formatApiError } from "../utils/formatError";
 
 export default function ScheduledCampaignsPage() {
   const { showToast } = useToast();
@@ -53,7 +54,7 @@ export default function ScheduledCampaignsPage() {
       setEditSchedule(null);
       load();
     } catch (err) {
-      showToast(err.response?.data?.detail || "Failed to update schedule.", "error");
+      showToast(formatApiError(err, "Failed to update schedule."), "error");
     } finally {
       setSaving(false);
     }

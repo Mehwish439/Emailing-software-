@@ -1,5 +1,9 @@
+import os
+import secrets
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from campaigns.models import Campaign
@@ -11,14 +15,20 @@ User = get_user_model()
 
 DEMO_EMAIL = "admin@example.com"
 DEMO_USERNAME = "admin"
-DEMO_PASSWORD = "Admin@12345"
 
 
 class Command(BaseCommand):
-    help = "Seeds the database with a demo admin user, contacts, a list, a template, and a campaign."
+    help = (
+        "LOCAL DEVELOPMENT ONLY. Seeds a demo user, contacts, a list, a template and a campaign. "
+        "Refuses to run when DEBUG is False. The demo password is taken from SEED_ADMIN_PASSWORD or randomly "
+        "generated and shown once - there is no built-in password."
+    )
 
     @transaction.atomic
     def handle(self, *args, **options):
+        if not settings.DEBUG:
+            raise CommandError("seed_data is for local development only and refuses to run when DEBUG is False.")
+        DEMO_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD") or secrets.token_urlsafe(14)
         user, created = User.objects.get_or_create(
             username=DEMO_USERNAME,
             defaults={"email": DEMO_EMAIL, "is_staff": True, "is_superuser": True, "company_name": "Demo Co"},
@@ -26,7 +36,7 @@ class Command(BaseCommand):
         if created:
             user.set_password(DEMO_PASSWORD)
             user.save()
-            self.stdout.write(self.style.SUCCESS(f"Created demo admin user: {DEMO_USERNAME} / {DEMO_PASSWORD}"))
+            self.stdout.write(self.style.SUCCESS(f"Created demo user \"{DEMO_USERNAME}\". Password (shown once): {DEMO_PASSWORD}"))
         else:
             self.stdout.write("Demo admin user already exists, skipping creation.")
 

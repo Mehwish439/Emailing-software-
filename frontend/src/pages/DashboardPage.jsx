@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
+import QuotaCard from "../components/QuotaCard";
 import RecipientsPanel from "../components/RecipientsPanel";
 import Spinner from "../components/Spinner";
 import StatCard from "../components/StatCard";
@@ -126,6 +127,8 @@ export default function DashboardPage() {
         <h1 className="text-2xl font-semibold text-slate-900">Dashboard</h1>
         <p className="text-sm text-slate-500">Here's how your campaigns are performing.</p>
       </div>
+
+      <QuotaCard />
 
       <p className="text-xs text-slate-400">
         Click a stat to see matching recipients across all campaigns — click again to clear.

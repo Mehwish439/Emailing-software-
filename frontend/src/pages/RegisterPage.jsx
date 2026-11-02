@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
+import { fieldErrors, formatApiError } from "../utils/formatError";
 
 const initialForm = {
   username: "",
@@ -33,13 +34,13 @@ export default function RegisterPage() {
       showToast("Account created! Welcome aboard.", "success");
       navigate("/dashboard", { replace: true });
     } catch (err) {
-      setErrors(err.response?.data || { detail: "Registration failed. Please try again." });
+      setErrors({ ...fieldErrors(err), detail: formatApiError(err, "Registration failed. Please try again.") });
     } finally {
       setLoading(false);
     }
   };
 
-  const fieldError = (name) => (Array.isArray(errors[name]) ? errors[name][0] : errors[name]);
+  const fieldError = (name) => errors[name];
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-10">
@@ -53,7 +54,7 @@ export default function RegisterPage() {
           <h1 className="text-xl font-semibold text-slate-900 text-center">Create your account</h1>
           <p className="text-sm text-slate-500 text-center mt-1">Start sending campaigns in minutes</p>
 
-          {errors.detail && (
+          {errors.detail && Object.keys(errors).length === 1 && (
             <div className="mt-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
               {errors.detail}
             </div>

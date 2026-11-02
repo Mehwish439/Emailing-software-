@@ -55,6 +55,10 @@ class BrevoClient:
             return {}
         return response.json()
 
+    def get_account(self):
+        """GET /account - read-only; proves the API key is accepted. Sends nothing."""
+        return self._request("GET", "/account")
+
     # ------------------------------------------------------------------
     # Transactional email (used for test sends and per-recipient sending)
     # ------------------------------------------------------------------

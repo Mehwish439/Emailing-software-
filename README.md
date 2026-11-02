@@ -1,5 +1,7 @@
 # Email Campaign Management Platform
 
+> **Start here:** [SETUP_GUIDE.md](SETUP_GUIDE.md) · [docs/UPGRADE_NOTES.md](docs/UPGRADE_NOTES.md)
+
 A full-stack email campaign management application: create contacts, build email
 templates, assemble campaigns, send immediately or schedule for later in any
 timezone, and track delivery/open/click/bounce analytics — backed by a Django
@@ -366,8 +368,7 @@ python manage.py seed_data
 
 Creates:
 
-- Demo admin user — **username `admin`, password `Admin@12345`** (also usable
-  via email `admin@example.com`)
+- Demo user `admin` (email `admin@example.com`) with a **random password printed once** (or set `SEED_ADMIN_PASSWORD`). Local development only: the command refuses to run when `DEBUG=False`.
 - A demo contact list with 5 sample contacts
 - A demo email template
 - A demo draft campaign
@@ -513,4 +514,4 @@ cd backend && python manage.py process_scheduled_campaigns
 cd backend && python manage.py test
 ```
 
-Demo login: **`admin` / `Admin@12345`**
+Demo login: user `admin`, with the one-time password printed by `seed_data` (local development only).

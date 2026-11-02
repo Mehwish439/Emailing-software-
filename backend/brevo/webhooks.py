@@ -109,6 +109,38 @@ def _extract_timestamp(payload):
     return parsed
 
 
+def escalate_soft_bounces(email):
+    """
+    Suppress an address after N CONSECUTIVE soft bounces (no 'delivered' event in between) inside the
+    window. Thresholds: settings.SOFT_BOUNCE_SUPPRESS_THRESHOLD (0 disables) / SOFT_BOUNCE_WINDOW_DAYS.
+    Shared by the Brevo webhook and the SMTP bounce intake (both call process_webhook_event), and safe
+    to run repeatedly because process_webhook_event de-duplicates events before reaching here.
+    """
+    from datetime import timedelta
+
+    from django.conf import settings
+    from django.utils import timezone
+
+    from analytics.models import CampaignEvent
+
+    threshold = getattr(settings, "SOFT_BOUNCE_SUPPRESS_THRESHOLD", 0)
+    if threshold <= 0:
+        return False
+    since = timezone.now() - timedelta(days=settings.SOFT_BOUNCE_WINDOW_DAYS)
+    events = CampaignEvent.objects.filter(contact__email__iexact=email, timestamp__gte=since,
+                                          event_type__in=["soft_bounce", "delivered"]).order_by("-timestamp")
+    streak = 0
+    for ev in events.values_list("event_type", flat=True)[:threshold + 5]:
+        if ev == "delivered":
+            break
+        streak += 1
+    if streak >= threshold:
+        add_suppression(email, "soft_bounce_limit")
+        logger.info("Suppressed %s after %s consecutive soft bounces", email, streak)
+        return True
+    return False
+
+
 def process_webhook_event(payload: dict):
     """
     Processes a single Brevo webhook event payload.
@@ -215,5 +247,11 @@ def process_webhook_event(payload: dict):
 
     if internal_event in SUPPRESSION_REASON_MAP:
         add_suppression(email, SUPPRESSION_REASON_MAP[internal_event])
+    elif internal_event == "soft_bounce":
+        escalate_soft_bounces(email)
+
+    from providers.dispatch import sync_state_from_event
+
+    sync_state_from_event(recipient, internal_event)
 
     return f"processed:{internal_event}"

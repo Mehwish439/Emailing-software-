@@ -1,0 +1,2 @@
+# One line per sending domain: sign any From address at the domain with that domain's key.
+*@@@DOMAIN@@ @@DKIM_SELECTOR@@._domainkey.@@DOMAIN@@

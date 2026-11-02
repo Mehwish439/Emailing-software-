@@ -90,7 +90,9 @@ def _cron_request_authorized(request):
         # same policy as the Brevo webhook secret.
         return settings.DEBUG
     provided = request.headers.get("X-Cron-Secret") or request.query_params.get("secret")
-    return provided == expected
+    import hmac
+
+    return hmac.compare_digest(str(provided or "").encode(), str(expected).encode())
 
 
 @api_view(["POST"])

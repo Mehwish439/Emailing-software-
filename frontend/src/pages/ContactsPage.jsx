@@ -19,6 +19,7 @@ import {
   listTags,
   updateContact,
 } from "../services/contactService";
+import { formatApiError } from "../utils/formatError";
 
 const emptyForm = { first_name: "", last_name: "", email: "", phone: "", status: "active", lists: [], tags: [] };
 
@@ -147,7 +148,7 @@ export default function ContactsPage() {
       setFormOpen(false);
       loadContacts();
     } catch (err) {
-      showToast(err.response?.data?.email?.[0] || err.response?.data?.detail || "Failed to save contact.", "error");
+      showToast(formatApiError(err, "Failed to save contact."), "error");
     } finally {
       setSaving(false);
     }
@@ -208,7 +209,7 @@ export default function ContactsPage() {
       loadContacts();
       loadLists();
     } catch (err) {
-      showToast(err.response?.data?.detail || "CSV import failed.", "error");
+      showToast(formatApiError(err, "CSV import failed."), "error");
     } finally {
       setImporting(false);
     }

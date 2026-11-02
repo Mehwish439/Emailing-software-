@@ -8,6 +8,7 @@ import Spinner from "../components/Spinner";
 import StatusBadge from "../components/StatusBadge";
 import { useToast } from "../context/ToastContext";
 import { deleteCampaign, duplicateCampaign, listCampaigns } from "../services/campaignService";
+import { formatApiError } from "../utils/formatError";
 
 export default function CampaignsPage() {
   const { showToast } = useToast();
@@ -59,7 +60,7 @@ export default function CampaignsPage() {
       setConfirmDelete(null);
       load();
     } catch (err) {
-      showToast(err.response?.data?.detail || "Failed to delete campaign.", "error");
+      showToast(formatApiError(err, "Failed to delete campaign."), "error");
       setConfirmDelete(null);
     }
   };

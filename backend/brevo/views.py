@@ -25,7 +25,9 @@ def _is_authorized(request):
         # No secret configured — only acceptable in local/dev environments.
         return settings.DEBUG
     provided = request.headers.get("X-Webhook-Secret") or request.query_params.get("secret")
-    return provided == expected
+    import hmac
+
+    return hmac.compare_digest(str(provided or "").encode(), str(expected).encode())
 
 
 @api_view(["POST"])

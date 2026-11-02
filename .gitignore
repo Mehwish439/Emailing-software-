@@ -17,3 +17,10 @@ frontend/.env
 .DS_Store
 .vscode/
 .idea/
+
+# --- SMTP deployment package: never commit real configuration or secrets ---
+deployment/self-hosted-smtp/requirements.env
+deployment/self-hosted-smtp/*.key
+deployment/self-hosted-smtp/*.pem
+deployment/self-hosted-smtp/__pycache__/
+*.private

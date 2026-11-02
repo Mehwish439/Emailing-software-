@@ -1,7 +1,9 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
+import { ROLE_LABELS, isCompanyAdmin, isPlatformAdmin } from "../utils/roles";
 
 const NAV_SECTIONS = [
   {
@@ -34,6 +36,51 @@ const NAV_SECTIONS = [
       { label: "Templates", to: "/templates", icon: "template" },
       { label: "Analytics", to: "/analytics", icon: "chart" },
       { label: "Settings", to: "/settings", icon: "settings" },
+    ],
+  },
+];
+
+
+const COMPANY_NAV = [
+  { items: [{ label: "Overview", to: "/company", icon: "grid", end: true }] },
+  {
+    title: "Manage",
+    items: [
+      { label: "Members & invitations", to: "/company/members", icon: "users" },
+      { label: "Quotas & usage", to: "/company/quotas", icon: "chart" },
+      { label: "Campaign activity", to: "/company/campaigns", icon: "send" },
+      { label: "Analytics", to: "/company/analytics", icon: "chart" },
+      { label: "Suppressions", to: "/company/suppressions", icon: "filter" },
+      { label: "Activity log", to: "/company/audit", icon: "list" },
+      { label: "Company & plan", to: "/company/settings", icon: "settings" },
+    ],
+  },
+];
+
+const PLATFORM_NAV = [
+  { items: [{ label: "Overview", to: "/platform", icon: "grid", end: true }] },
+  {
+    title: "Tenants",
+    items: [
+      { label: "Companies", to: "/platform/companies", icon: "users" },
+      { label: "Users", to: "/platform/users", icon: "users" },
+      { label: "Plans & quotas", to: "/platform/plans", icon: "tag" },
+    ],
+  },
+  {
+    title: "Sending",
+    items: [
+      { label: "Providers & limits", to: "/platform/providers", icon: "settings" },
+      { label: "Queue & failures", to: "/platform/queue", icon: "clock" },
+      { label: "Campaign monitor", to: "/platform/campaigns", icon: "send" },
+      { label: "Analytics", to: "/platform/analytics", icon: "chart" },
+    ],
+  },
+  {
+    title: "Operations",
+    items: [
+      { label: "System health", to: "/platform/health", icon: "bolt" },
+      { label: "Audit log", to: "/platform/audit", icon: "list" },
     ],
   },
 ];
@@ -92,10 +139,58 @@ function Icon({ name }) {
   );
 }
 
+function SidebarContent({ sections, areaLabel }) {
+  return (
+    <>
+      <div className="flex items-center gap-2 px-6 h-16 border-b border-slate-200">
+        <div className="h-8 w-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold">Q</div>
+        <div className="leading-tight">
+          <span className="font-semibold text-slate-900">QRM</span>
+          {areaLabel && <p className="text-[11px] text-slate-500">{areaLabel}</p>}
+        </div>
+      </div>
+      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6" aria-label="Main">
+        {sections.map((section, idx) => (
+          <div key={idx}>
+            {section.title && <p className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{section.title}</p>}
+            <div className="space-y-1">
+              {section.items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${isActive ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100"}`
+                  }
+                >
+                  <Icon name={item.icon} />
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
+          </div>
+        ))}
+      </nav>
+    </>
+  );
+}
+
 export default function DashboardLayout() {
   const { user, logout } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Which navigation to show follows the area being viewed; backend permissions remain authoritative.
+  const area = location.pathname.startsWith("/platform") ? "platform" : location.pathname.startsWith("/company") ? "company" : "user";
+  const sections = area === "platform" ? PLATFORM_NAV : area === "company" ? COMPANY_NAV : NAV_SECTIONS;
+  const areaLabel = area === "platform" ? "Platform admin" : area === "company" ? "Company admin" : null;
+  const switchLinks = [
+    isPlatformAdmin(user) && area !== "platform" && { to: "/platform", label: "Platform admin" },
+    isCompanyAdmin(user) && area !== "company" && { to: "/company", label: "Company admin" },
+    area !== "user" && { to: "/dashboard", label: "My campaigns" },
+  ].filter(Boolean);
 
   const handleLogout = async () => {
     try {
@@ -111,48 +206,31 @@ export default function DashboardLayout() {
   return (
     <div className="min-h-screen flex bg-slate-50">
       <aside className="hidden md:flex w-64 flex-col bg-white border-r border-slate-200">
-        <div className="flex items-center gap-2 px-6 h-16 border-b border-slate-200">
-          <div className="h-8 w-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold">Q</div>
-          <span className="font-semibold text-slate-900">QRM</span>
-        </div>
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
-          {NAV_SECTIONS.map((section, idx) => (
-            <div key={idx}>
-              {section.title && (
-                <p className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  {section.title}
-                </p>
-              )}
-              <div className="space-y-1">
-                {section.items.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    className={({ isActive }) =>
-                      `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                        isActive ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100"
-                      }`
-                    }
-                  >
-                    <Icon name={item.icon} />
-                    {item.label}
-                  </NavLink>
-                ))}
-              </div>
-            </div>
-          ))}
-        </nav>
+        <SidebarContent sections={sections} areaLabel={areaLabel} />
       </aside>
+      {menuOpen && (
+        <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
+          <div className="absolute inset-0 bg-slate-900/50" onClick={() => setMenuOpen(false)} />
+          <aside className="relative flex w-64 h-full flex-col bg-white" onClick={() => setMenuOpen(false)}>
+            <SidebarContent sections={sections} areaLabel={areaLabel} />
+          </aside>
+        </div>
+      )}
 
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-16 flex items-center justify-between px-4 md:px-6 border-b border-slate-200 bg-white">
-          <div className="flex-1 max-w-md">
-            <input type="search" placeholder="Search…" className="input" />
+          <div className="flex items-center gap-3">
+            <button className="md:hidden btn-secondary px-2.5" aria-label="Open navigation" onClick={() => setMenuOpen(true)}>
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+            </button>
+            {switchLinks.map((l) => (
+              <Link key={l.to} to={l.to} className="text-sm font-medium text-brand-700 hover:underline">{l.label}</Link>
+            ))}
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
               <p className="text-sm font-medium text-slate-900">{user?.first_name || user?.username}</p>
-              <p className="text-xs text-slate-500">{user?.email}</p>
+              <p className="text-xs text-slate-500">{user?.email} · {ROLE_LABELS[user?.role] || "User"}</p>
             </div>
             <div className="h-9 w-9 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-semibold">
               {(user?.first_name?.[0] || user?.username?.[0] || "?").toUpperCase()}

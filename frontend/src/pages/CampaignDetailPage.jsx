@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 
 import ConfirmDialog from "../components/ConfirmDialog";
 import DateTimeTimezonePicker from "../components/DateTimeTimezonePicker";
@@ -19,6 +19,7 @@ import {
 } from "../services/campaignService";
 import { cancelSchedule, createSchedule, listScheduledCampaigns } from "../services/schedulingService";
 import { localDateTimeInZoneToUTC } from "../utils/timezone";
+import { formatApiError } from "../utils/formatError";
 
 function defaultDate() {
   const d = new Date();
@@ -28,7 +29,6 @@ function defaultDate() {
 
 export default function CampaignDetailPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const { showToast } = useToast();
 
   const [campaign, setCampaign] = useState(null);
@@ -163,7 +163,7 @@ export default function CampaignDetailPage() {
       setTestModalOpen(false);
       setTestEmail("");
     } catch (err) {
-      showToast(err.response?.data?.detail || "Failed to send test email.", "error");
+      showToast(formatApiError(err, "Failed to send test email."), "error");
     } finally {
       setSendingTest(false);
     }
@@ -177,7 +177,7 @@ export default function CampaignDetailPage() {
       setConfirmSend(false);
       load();
     } catch (err) {
-      showToast(err.response?.data?.detail || "Failed to send campaign.", "error");
+      showToast(formatApiError(err, "Failed to send campaign."), "error");
       setConfirmSend(false);
     } finally {
       setSendingNow(false);
@@ -193,7 +193,7 @@ export default function CampaignDetailPage() {
       setScheduleModalOpen(false);
       load();
     } catch (err) {
-      showToast(err.response?.data?.detail || "Failed to schedule campaign.", "error");
+      showToast(formatApiError(err, "Failed to schedule campaign."), "error");
     } finally {
       setScheduling(false);
     }
@@ -227,6 +227,13 @@ export default function CampaignDetailPage() {
             <StatusBadge status={campaign.status} />
           </div>
           <p className="text-sm text-slate-500">{campaign.subject}</p>
+          <p className="text-xs text-slate-500 mt-1">
+            {campaign.provider
+              ? <>Sent via <b>{campaign.provider === "smtp" ? "our SMTP server" : "Brevo"}</b></>
+              : campaign.requested_provider
+                ? <>Will send via <b>{campaign.requested_provider === "smtp" ? "our SMTP server" : "Brevo"}</b></>
+                : <>Will send via the default provider (change it with Edit)</>}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button className="btn-secondary" onClick={() => setTestModalOpen(true)}>

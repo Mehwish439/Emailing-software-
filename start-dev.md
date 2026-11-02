@@ -19,7 +19,7 @@ copy .env.example .env         REM Windows, then edit it
 #   -> set BREVO_API_KEY, BREVO_SENDER_NAME, BREVO_SENDER_EMAIL
 
 python manage.py migrate
-python manage.py seed_data
+python manage.py seed_data   # local only; prints a one-time demo password
 python manage.py runserver
 ```
 
@@ -35,8 +35,8 @@ copy .env.example .env         REM Windows
 npm run dev
 ```
 
-App available at `http://localhost:5173/`. Log in with `admin` /
-`Admin@12345`.
+App available at `http://localhost:5173/`. Log in with `admin` and the one-time
+password printed by `seed_data`.
 
 ## Processing scheduled campaigns locally
 

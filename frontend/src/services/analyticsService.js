@@ -1,4 +1,3 @@
-import { useSyncExternalStore } from "react";
 import api from "./api";
 import { downloadBlob } from "../utils/download";
 

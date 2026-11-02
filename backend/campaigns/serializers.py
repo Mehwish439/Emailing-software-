@@ -27,9 +27,9 @@ class CampaignSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "subject", "sender_name", "sender_email", "template", "template_name",
             "contact_lists", "status", "campaign_type", "ab_variants", "brevo_campaign_id", "recipient_count",
-            "eligible_recipient_count", "created_by", "created_at", "updated_at", "sent_at", "failure_reason",
+            "eligible_recipient_count", "requested_provider", "provider", "created_by", "created_at", "updated_at", "sent_at", "failure_reason",
         ]
-        read_only_fields = ["id", "status", "brevo_campaign_id", "created_by", "created_at", "updated_at", "sent_at", "failure_reason"]
+        read_only_fields = ["id", "status", "provider", "brevo_campaign_id", "created_by", "created_at", "updated_at", "sent_at", "failure_reason"]
 
     def get_ab_variants(self, obj):
         # Read-only convenience so the frontend can fetch a campaign and
@@ -65,6 +65,16 @@ class CampaignSerializer(serializers.ModelSerializer):
         if request and request.user and request.user.is_authenticated:
             self.fields["template"].queryset = EmailTemplate.objects.filter(created_by=request.user)
             self.fields["contact_lists"].queryset = ContactList.objects.filter(owner=request.user)
+
+    def validate_requested_provider(self, value):
+        if not value:
+            return ""
+        from providers.registry import available_providers
+
+        request = self.context.get("request")
+        if request and value not in available_providers(request.user)["options"]:
+            raise serializers.ValidationError(f"Provider '{value}' is not available to your account.")
+        return value
 
     def validate(self, attrs):
         # On update, only draft campaigns may be freely edited.

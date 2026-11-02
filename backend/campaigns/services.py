@@ -30,7 +30,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from common.db import select_for_update_kwargs
-from common.exceptions import BrevoAPIError, ValidationAppError
+from common.exceptions import ValidationAppError
 from contacts.models import Suppression
 from contacts.services_suppression import filter_out_suppressed
 
@@ -110,8 +110,27 @@ def _claim_campaign_for_sending(campaign_id):
     campaign = Campaign.objects.select_for_update().get(id=campaign_id)
     validate_campaign_sendable(campaign)
     build_recipient_snapshot(campaign)
+
+    # --- Provider: choose once, validate it is usable, and freeze it on the campaign so every
+    # retry/resume uses the same provider (never half Brevo / half SMTP). No silent failover.
+    from providers.base import ProviderConfigError
+    from providers.registry import get_provider, resolve_provider_name
+
+    try:
+        provider_name = resolve_provider_name(campaign)
+        get_provider(provider_name).validate_config()
+    except ProviderConfigError as exc:
+        raise ValidationAppError(f"Email provider is not ready: {exc}") from exc
+    campaign.provider = provider_name
+
+    # --- Quota: one credit per eligible recipient message, checked at user, company and
+    # platform level and reserved transactionally. Rolls back this whole claim if exceeded.
+    from tenancy.quota import reserve_campaign_quota
+
+    reserve_campaign_quota(campaign)
+
     campaign.status = Campaign.Status.PROCESSING
-    campaign.save(update_fields=["status", "updated_at"])
+    campaign.save(update_fields=["status", "provider", "updated_at"])
     return campaign
 
 
@@ -139,10 +158,19 @@ def _send_pending_recipients(campaign: Campaign):
     and was then still mailed by another, already-snapshotted campaign a
     couple of days later.
     """
-    from brevo.services import send_to_recipient
+    from providers.dispatch import Outcome, send_recipient
+    from tenancy import quota
 
+    owner_company = getattr(campaign.created_by, "company", None)
+    if owner_company is not None and not owner_company.can_send:
+        logger.warning("Campaign %s held: company '%s' is suspended.", campaign.id, owner_company)
+        return  # held, not failed -- resumes automatically if the company is reactivated
+
+    now = timezone.now()
     pending = list(
         campaign.recipients.filter(status=CampaignRecipient.Status.PENDING)
+        # Recipients whose last attempt deferred (temporary failure) wait for their backoff.
+        .exclude(outbound_message__state="deferred", outbound_message__next_attempt_at__gt=now)
         .select_related("contact", "variant", "variant__template")
         .order_by("id")[: settings.CAMPAIGN_SEND_BATCH_SIZE]
     )
@@ -157,38 +185,40 @@ def _send_pending_recipients(campaign: Campaign):
     for recipient in pending:
         if recipient.contact.email in suppressed_emails:
             logger.info(
-                "Skipping recipient=%s (%s) for campaign=%s — contact was suppressed after this "
+                "Skipping recipient=%s (%s) for campaign=%s -- contact was suppressed after this "
                 "campaign's recipient snapshot was taken.",
                 recipient.id, recipient.contact.email, campaign.id,
             )
-            # BLOCKED is the closest existing status for "deliberately not
-            # sent because they're suppressed" — matches the same word Brevo
-            # itself uses when its own blocklist stops a send.
+            # BLOCKED = "deliberately not sent because suppressed" (same word Brevo uses).
             recipient.status = CampaignRecipient.Status.BLOCKED
             recipient.save(update_fields=["status", "updated_at"])
+            quota.release(recipient.id)
             continue
 
-        last_error = None
-        for attempt in range(1, MAX_SEND_ATTEMPTS + 1):
-            try:
-                send_to_recipient(campaign, recipient)
-                last_error = None
-                break
-            except BrevoAPIError as exc:
-                last_error = exc
-                logger.warning(
-                    "Brevo send failed for recipient=%s (attempt %s/%s): %s",
-                    recipient.id, attempt, MAX_SEND_ATTEMPTS, exc,
-                )
+        outcome = send_recipient(campaign, recipient)
 
-        if last_error is not None:
+        if outcome == Outcome.RATE_LIMITED:
+            break  # capacity guard (or paused queue): leave the rest PENDING for the next tick
+        if outcome == Outcome.CONFIG_ERROR:
+            break  # provider unusable right now: nothing sent, everything stays PENDING
+        if outcome in (Outcome.BUSY, Outcome.DEFERRED):
+            continue  # another worker has it, or it is waiting out a retry backoff
+
+        if outcome == Outcome.ACCEPTED:
+            recipient.status = CampaignRecipient.Status.SENT
+            recipient.sent_at = timezone.now()
+            recipient.save(update_fields=["status", "sent_at", "updated_at"])
+            quota.mark_consumed(recipient.id)
+        elif outcome == Outcome.REVIEW:
+            # Outcome unknown: it may have been sent, so keep the credit consumed (never
+            # under-count) and never auto-retry. Surfaced to admins as "needs review".
             recipient.status = CampaignRecipient.Status.FAILED
             recipient.save(update_fields=["status", "updated_at"])
-            continue
-
-        recipient.status = CampaignRecipient.Status.SENT
-        recipient.sent_at = timezone.now()
-        recipient.save(update_fields=["status", "sent_at", "updated_at"])
+            quota.mark_consumed(recipient.id)
+        else:  # Outcome.FAILED -- nothing was accepted
+            recipient.status = CampaignRecipient.Status.FAILED
+            recipient.save(update_fields=["status", "updated_at"])
+            quota.release(recipient.id)
 
 
 def _sync_schedule_on_finalize(campaign: Campaign):
@@ -333,6 +363,9 @@ def mark_campaign_sent(campaign: Campaign):
 
 
 def mark_campaign_failed(campaign: Campaign, reason: str):
+    from tenancy.quota import release_campaign
+
     campaign.status = Campaign.Status.FAILED
     campaign.failure_reason = reason[:2000]
     campaign.save(update_fields=["status", "failure_reason", "updated_at"])
+    release_campaign(campaign)  # unsent messages must not keep consuming quota

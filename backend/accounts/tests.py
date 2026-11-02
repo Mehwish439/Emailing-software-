@@ -98,3 +98,17 @@ class AuthenticationTests(APITestCase):
     def test_invalid_token_returns_401_not_403(self):
         response = self.client.get(self.me_url, HTTP_AUTHORIZATION="Bearer not-a-real-token")
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+class PublicRegistrationFlagTests(APITestCase):
+    def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()   # the "auth" throttle scope is cache-backed and shared across tests in a run
+
+    def test_registration_can_be_disabled(self):
+        from django.test import override_settings
+
+        body = {"username": "n", "email": "n@example.com", "password": "Str0ng-Pass-123!", "password_confirm": "Str0ng-Pass-123!"}
+        with override_settings(ALLOW_PUBLIC_REGISTRATION=False):
+            self.assertEqual(self.client.post("/api/auth/register/", body, format="json").status_code, 403)
+        self.assertEqual(self.client.post("/api/auth/register/", body, format="json").status_code, 201)

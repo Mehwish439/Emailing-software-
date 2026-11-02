@@ -7,6 +7,7 @@ import Modal from "../components/Modal";
 import Spinner from "../components/Spinner";
 import { useToast } from "../context/ToastContext";
 import { createContactList, deleteContactList, listContactLists, updateContactList } from "../services/contactService";
+import { formatApiError } from "../utils/formatError";
 
 const emptyForm = { name: "", description: "" };
 
@@ -62,7 +63,7 @@ export default function ContactListsPage() {
       setFormOpen(false);
       load();
     } catch (err) {
-      showToast(err.response?.data?.name?.[0] || "Failed to save list.", "error");
+      showToast(formatApiError(err, "Failed to save list."), "error");
     } finally {
       setSaving(false);
     }

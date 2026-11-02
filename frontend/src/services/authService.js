@@ -6,6 +6,12 @@ export async function register(payload) {
   return data.user;
 }
 
+export async function registerCompany(payload) {
+  const { data } = await api.post("/auth/register-company/", payload);
+  setTokens({ access: data.access, refresh: data.refresh });
+  return data.user;
+}
+
 export async function login({ username, password }) {
   const { data } = await api.post("/auth/login/", { username, password });
   setTokens({ access: data.access, refresh: data.refresh });

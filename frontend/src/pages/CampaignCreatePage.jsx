@@ -4,11 +4,13 @@ import { useNavigate } from "react-router-dom";
 import DateTimeTimezonePicker from "../components/DateTimeTimezonePicker";
 import Modal from "../components/Modal";
 import { useToast } from "../context/ToastContext";
+import ProviderPicker from "../components/ProviderPicker";
 import { createCampaign, sendCampaignNow, setCampaignVariants } from "../services/campaignService";
 import { createContactList, importContactsCSV, listContactLists } from "../services/contactService";
 import { createSchedule } from "../services/schedulingService";
 import { listTemplates } from "../services/templateService";
 import { localDateTimeInZoneToUTC } from "../utils/timezone";
+import { formatApiError } from "../utils/formatError";
 
 const STEPS = ["Campaign Details", "Recipients", "Email Content", "Review", "Send or Schedule"];
 
@@ -47,6 +49,7 @@ export default function CampaignCreatePage() {
     sender_email: "",
     template: "",
     contact_lists: [],
+    requested_provider: "",
   });
 
   // A/B testing — "normal" (default, existing behavior) or "ab_test".
@@ -203,7 +206,7 @@ export default function CampaignCreatePage() {
       }
       navigate(`/campaigns/${campaign.id}`);
     } catch (err) {
-      const detail = err.response?.data?.detail || "Failed to create/send campaign.";
+      const detail = formatApiError(err, "Failed to create/send campaign.");
       setScheduleError(detail);
       showToast(detail, "error");
     } finally {
@@ -310,6 +313,7 @@ export default function CampaignCreatePage() {
                 />
               </div>
             </div>
+            <ProviderPicker value={form.requested_provider} onChange={(v) => setForm({ ...form, requested_provider: v })} />
           </div>
         )}
 
@@ -552,6 +556,7 @@ export default function CampaignCreatePage() {
 
         {step === 4 && (
           <div className="space-y-5">
+            <ProviderPicker value={form.requested_provider} onChange={(v) => setForm({ ...form, requested_provider: v })} />
             <div className="flex gap-3">
               <label
                 className={`flex-1 rounded-lg border px-4 py-3 cursor-pointer text-center text-sm font-medium ${

@@ -11,7 +11,40 @@ from .models import Campaign
 from .serializers import CampaignSerializer, SendTestEmailSerializer
 
 
-class CampaignViewSet(viewsets.ModelViewSet):
+class _ProviderChoiceMixin:
+    @action(detail=False, methods=["get"], url_path="providers")
+    def providers(self, request):
+        """Providers the signed-in user may choose for a campaign. Names and readiness only - no secrets."""
+        from providers.base import ProviderConfigError
+        from providers.registry import available_providers, get_provider
+
+        from providers.registry import PROVIDERS
+
+        info = available_providers(request.user)
+
+        def ready(name):
+            try:
+                get_provider(name).validate_config()
+                return True
+            except ProviderConfigError:
+                return False
+
+        labels = {"brevo": "Brevo", "smtp": "Our own SMTP server"}
+        options = []
+        for name in PROVIDERS:                       # always list every provider so the choice is visible
+            allowed = name in info["options"]
+            is_ready = ready(name)
+            reason = ""
+            if not allowed:
+                reason = "Not enabled for your account - ask your administrator."
+            elif not is_ready:
+                reason = "Not configured on the server yet."
+            options.append({"name": name, "label": labels.get(name, name), "allowed": allowed,
+                            "ready": is_ready, "usable": allowed and is_ready, "reason": reason})
+        return Response({"default": info["default"], "choice_allowed": info["choice_allowed"], "options": options})
+
+
+class CampaignViewSet(_ProviderChoiceMixin, viewsets.ModelViewSet):
     serializer_class = CampaignSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -113,7 +146,7 @@ class CampaignViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="test")
     def send_test(self, request, pk=None):
         self.throttle_scope = "test-email"
-        from brevo.services import send_test_email
+        from providers.testsend import send_test_email  # routes via the active provider (Brevo path unchanged)
 
         campaign = self.get_object()
         serializer = SendTestEmailSerializer(data=request.data)

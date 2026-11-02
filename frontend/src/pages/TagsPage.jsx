@@ -7,6 +7,7 @@ import Modal from "../components/Modal";
 import Spinner from "../components/Spinner";
 import { useToast } from "../context/ToastContext";
 import { createTag, deleteTag, listTags, updateTag } from "../services/contactService";
+import { formatApiError } from "../utils/formatError";
 
 export default function TagsPage() {
   const { showToast } = useToast();
@@ -61,7 +62,7 @@ export default function TagsPage() {
       setFormOpen(false);
       load();
     } catch (err) {
-      showToast(err.response?.data?.name?.[0] || "Failed to save tag.", "error");
+      showToast(formatApiError(err, "Failed to save tag."), "error");
     } finally {
       setSaving(false);
     }

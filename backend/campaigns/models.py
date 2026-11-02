@@ -11,6 +11,9 @@ class Campaign(TimeStampedModel):
         DRAFT = "draft", "Draft"
         SCHEDULED = "scheduled", "Scheduled"
         PROCESSING = "processing", "Processing"
+        # Paused by a company admin / platform admin. Sending simply stops (the resume job only
+        # picks up PROCESSING campaigns); un-pausing returns it to PROCESSING. Nothing is lost.
+        PAUSED = "paused", "Paused"
         SENT = "sent", "Sent"
         CANCELLED = "cancelled", "Cancelled"
         FAILED = "failed", "Failed"
@@ -25,6 +28,10 @@ class Campaign(TimeStampedModel):
     sender_email = models.EmailField()
     template = models.ForeignKey(EmailTemplate, on_delete=models.PROTECT, related_name="campaigns")
     contact_lists = models.ManyToManyField(ContactList, related_name="campaigns", blank=True)
+    # Restored: migration 0002_campaign_segments already created this M2M in the deployed
+    # database, but the model had drifted and no longer declared it (makemigrations wanted
+    # to DROP it). Declaring it again matches the real schema and loses no data.
+    segments = models.ManyToManyField("contacts.Segment", related_name="campaigns", blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     # For an AB_TEST campaign, `subject`/`template` above are kept mirroring
     # Version A (see ab_testing.services.set_campaign_variants) so every
@@ -36,6 +43,14 @@ class Campaign(TimeStampedModel):
     campaign_type = models.CharField(max_length=20, choices=CampaignType.choices, default=CampaignType.NORMAL)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="campaigns")
     brevo_campaign_id = models.CharField(max_length=100, blank=True, null=True)
+    # Email provider chosen when sending starts ("" until then). Frozen at claim time so
+    # retries/resumes can never send half a campaign through one provider and half through
+    # another. Changing it afterwards requires the explicit, audited switch-provider action.
+    provider = models.CharField(max_length=30, blank=True, default="")
+    # What the owner ASKED for ("" = use the default policy). Validated against what the owner's
+    # company/platform allows, re-checked when sending starts, and never silently replaced by another
+    # provider. `provider` above is what was actually frozen for sending.
+    requested_provider = models.CharField(max_length=30, blank=True, default="")
     sent_at = models.DateTimeField(null=True, blank=True)
     failure_reason = models.TextField(blank=True)
 

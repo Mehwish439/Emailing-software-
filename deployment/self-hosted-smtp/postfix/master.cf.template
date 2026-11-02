@@ -1,0 +1,21 @@
+# =============================================================================
+# MailFlow additions to /etc/postfix/master.cf (merged between the BEGIN/END markers by
+# configure-postfix.sh; the rest of Ubuntu's stock master.cf is left untouched).
+# =============================================================================
+# BEGIN MAILFLOW
+# Authenticated submission (STARTTLS required before AUTH). Only APP_SERVER_IPS can reach it (firewall).
+submission inet n       -       n       -       -       smtpd
+  -o syslog_name=postfix/submission
+  -o smtpd_tls_security_level=encrypt
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_tls_auth_only=yes
+  -o smtpd_reject_unlisted_recipient=no
+  -o smtpd_sender_restrictions=reject_sender_login_mismatch,permit_sasl_authenticated,reject
+  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o milter_macro_daemon_name=ORIGINATING
+# Delivers bounce/ARF messages for @@BOUNCE_DOMAIN@@ to the forwarder, which relays them to the app.
+mailflow-bounce unix -  n       n       -       5       pipe
+  flags=Xhq user=mailflow argv=/usr/local/sbin/mailflow-bounce-forwarder ${recipient}
+@@RATE_TRANSPORTS@@
+# END MAILFLOW

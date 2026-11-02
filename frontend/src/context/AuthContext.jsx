@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 
-import { fetchCurrentUser, login as loginService, logout as logoutService, register as registerService } from "../services/authService";
+import { fetchCurrentUser, login as loginService, logout as logoutService, register as registerService, registerCompany as registerCompanyService } from "../services/authService";
 import { getAccessToken } from "../services/api";
 
 const AuthContext = createContext(null);
@@ -40,13 +40,19 @@ export function AuthProvider({ children }) {
     return newUser;
   };
 
+  const registerCompany = async (payload) => {
+    const newUser = await registerCompanyService(payload);
+    setUser(newUser);
+    return newUser;
+  };
+
   const logout = async () => {
     await logoutService();
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, setUser, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, setUser, loading, login, register, registerCompany, logout }}>
       {children}
     </AuthContext.Provider>
   );

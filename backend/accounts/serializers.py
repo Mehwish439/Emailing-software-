@@ -7,10 +7,24 @@ User = get_user_model()
 
 
 class UserSerializer(serializers.ModelSerializer):
+    # Role / tenant / quotas are READ-ONLY here: a user can never promote themselves or change
+    # their own limits through /auth/me or registration. Only company/platform admin APIs can.
+    quota = serializers.SerializerMethodField()
+    company = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ["id", "username", "email", "first_name", "last_name", "company_name", "date_joined"]
-        read_only_fields = ["id", "date_joined"]
+        fields = ["id", "username", "email", "first_name", "last_name", "company_name", "date_joined",
+                  "role", "company", "daily_quota", "monthly_quota", "quota"]
+        read_only_fields = ["id", "date_joined", "role", "company", "daily_quota", "monthly_quota", "quota"]
+
+    def get_company(self, obj):
+        return {"id": obj.company_id, "name": obj.company.name} if obj.company_id else None
+
+    def get_quota(self, obj):
+        from tenancy.quota import quota_snapshot
+
+        return quota_snapshot(obj)
 
 
 class RegisterSerializer(serializers.ModelSerializer):

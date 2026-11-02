@@ -1,0 +1,3 @@
+# One line per sending domain (rendered per domain by configure-opendkim.sh):
+# <selector>._domainkey.<domain> <domain>:<selector>:<path to PRIVATE key>
+@@DKIM_SELECTOR@@._domainkey.@@DOMAIN@@ @@DOMAIN@@:@@DKIM_SELECTOR@@:/etc/opendkim/keys/@@DOMAIN@@/@@DKIM_SELECTOR@@.private
