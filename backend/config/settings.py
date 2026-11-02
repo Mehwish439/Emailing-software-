@@ -209,25 +209,58 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # CORS / CSRF
 # ---------------------------------------------------------------------------
 def _origins(name):
-    """Normalise to scheme://host[:port] (no trailing slash/path) - a trailing slash never matches a browser Origin."""
-    return [o.rstrip("/") for o in env_list(name, "")]
+    """Return normalised browser origins (scheme://host[:port], no trailing slash)."""
+    return [item.rstrip("/") for item in env_list(name, "")]
 
 
-# Browsers send Origin as scheme://host:port with NO path. Exactly the origins listed here get
-# Access-Control-Allow-Origin. Set CORS_ALLOWED_ORIGINS (comma-separated) in the backend .env.
-CORS_ALLOWED_ORIGINS = _origins("CORS_ALLOWED_ORIGINS")
-if not CORS_ALLOWED_ORIGINS and os.getenv("FRONTEND_URL"):
-    CORS_ALLOWED_ORIGINS = [os.environ["FRONTEND_URL"].rstrip("/")]     # sensible default: the app's own frontend
+def _unique_origins(*groups):
+    """Merge origin lists while preserving order and removing duplicates."""
+    result = []
+    for group in groups:
+        for origin in group:
+            origin = origin.strip().rstrip("/")
+            if origin and origin not in result:
+                result.append(origin)
+    return result
+
+
+# The production React frontend on Render. Keep this explicit fallback so a
+# missing/incorrect Render environment variable cannot silently break login.
+# If you change the frontend's Render hostname, update this value or set
+# FRONTEND_URL / CORS_ALLOWED_ORIGINS in the backend environment.
+DEFAULT_FRONTEND_ORIGIN = "https://emailing-software-1.onrender.com"
+
+# Accept origins from the comma-separated CORS_ALLOWED_ORIGINS environment
+# variable, the FRONTEND_URL variable, and the known production frontend.
+# This deliberately does NOT use a wildcard: only trusted frontends are allowed.
+CORS_ALLOWED_ORIGINS = _unique_origins(
+    _origins("CORS_ALLOWED_ORIGINS"),
+    _origins("FRONTEND_URL"),
+    [DEFAULT_FRONTEND_ORIGIN],
+)
+
+# Local Vite development/preview origins are allowed only when DEBUG=True.
 if DEBUG:
-    # Local development only: always allow the Vite dev/preview servers (never wildcard).
-    for _o in ("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://127.0.0.1:4173"):
-        if _o not in CORS_ALLOWED_ORIGINS:
-            CORS_ALLOWED_ORIGINS.append(_o)
+    CORS_ALLOWED_ORIGINS = _unique_origins(
+        CORS_ALLOWED_ORIGINS,
+        [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:4173",
+            "http://127.0.0.1:4173",
+        ],
+    )
 
 CORS_ALLOW_CREDENTIALS = True
+CORS_URLS_REGEX = r"^/api/.*$"
+CORS_PREFLIGHT_MAX_AGE = 86400
 
-CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
-
+# CSRF_TRUSTED_ORIGINS also accepts an explicit environment variable. Merge
+# rather than overwrite so the deployed frontend remains trusted.
+CSRF_TRUSTED_ORIGINS = _unique_origins(
+    _origins("CSRF_TRUSTED_ORIGINS"),
+    CORS_ALLOWED_ORIGINS,
+)
 
 # ---------------------------------------------------------------------------
 # REST Framework
