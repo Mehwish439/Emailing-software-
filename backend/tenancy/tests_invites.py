@@ -28,20 +28,21 @@ class CompanyInviteEmailTests(TenantBase):
         self.plan.save()
         self.login(self.acme_admin)
 
-    def test_link_returned_only_when_email_was_not_sent(self):
+    def test_link_is_always_returned_to_the_admin_and_flags_whether_email_was_accepted(self):
         r = self.client.post("/api/company/members/", {"email": "a@example.com"}, format="json")
         self.assertFalse(r.data["email_sent"])
-        self.assertIn("accept-invite?token=", r.data["invite_url"])
+        self.assertIn("/join?token=", r.data["invite_url"])
         with patch(MAIL, return_value=True):
             r = self.client.post("/api/company/members/", {"email": "b@example.com"}, format="json")
         self.assertTrue(r.data["email_sent"])
-        self.assertIsNone(r.data["invite_url"])      # secret is not echoed once it was emailed
+        # the admin ALWAYS gets the link, even when the provider accepted the email (it may never arrive)
+        self.assertIn("/join?token=", r.data["invite_url"])
 
     def test_resend_only_for_own_company_pending_users(self):
         pending = self.client.post("/api/company/members/", {"email": "p@example.com"}, format="json").data["user"]["id"]
         ok = self.client.post(f"/api/company/members/{pending}/resend-invite/")
         self.assertEqual(ok.status_code, 200)
-        self.assertIn("accept-invite?token=", ok.data["invite_url"])
+        self.assertIn("/join?token=", ok.data["invite_url"])
         self.assertTrue(AuditLog.objects.filter(action="user.invite_resent").exists())
         # already-active user: rejected
         self.assertEqual(self.client.post(f"/api/company/members/{self.acme_user.id}/resend-invite/").status_code, 400)
@@ -191,3 +192,36 @@ class BrevoLiveHealthTests(TenantBase):
             good = self.client.get("/api/platform/health/").data["providers"]["brevo"]
         self.assertTrue(good["ok"])
         self.assertNotIn("test-placeholder", str(good))
+
+
+class InviteEmailContentTests(TenantBase):
+    def test_email_contains_the_real_absolute_join_link_twice(self):
+        from brevo.client import BrevoClient
+
+        self.plan.max_users = 10; self.plan.save()
+        self.login(self.acme_admin)
+        sent = {}
+        with override_settings(SEND_INVITE_EMAILS=True, BREVO_API_KEY="k", BREVO_SENDER_EMAIL="s@example.com", FRONTEND_URL="https://app.example.com"), \
+                patch.object(BrevoClient, "send_transactional_email", side_effect=lambda **kw: sent.update(kw) or {}):
+            r = self.client.post("/api/company/members/", {"email": "mail@acme.test", "first_name": "Mia"}, format="json")
+        self.assertTrue(r.data["email_sent"])
+        self.assertTrue(r.data["invite_url"].startswith("https://app.example.com/join?token="))
+        self.assertEqual(sent["html_content"].count(r.data["invite_url"]), 3)       # button href + visible link (text + href)
+        self.assertEqual(sent["to"][0]["email"], "mail@acme.test")
+
+
+class SuperuserRoleTests(TenantBase):
+    def test_createsuperuser_account_is_a_platform_admin_in_the_api(self):
+        su = User.objects.create_superuser("owner", "owner@example.com", "Str0ng-Pass-123!")
+        self.assertEqual(su.role, "super_admin")
+        r = self.client.post("/api/auth/login/", {"username": "owner@example.com", "password": "Str0ng-Pass-123!"}, format="json")
+        self.assertEqual(r.data["user"]["role"], "super_admin")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {r.data['access']}")
+        self.assertEqual(self.client.get("/api/platform/overview/").status_code, 200)
+        self.assertEqual(self.client.get("/api/auth/me/").data["role"], "super_admin")
+
+    def test_superuser_created_before_the_fix_is_reported_correctly(self):
+        su = User.objects.create_superuser("old", "old@example.com", "Str0ng-Pass-123!")
+        User.objects.filter(pk=su.pk).update(role="user")           # simulate legacy row
+        self.client.force_authenticate(User.objects.get(pk=su.pk))
+        self.assertEqual(self.client.get("/api/auth/me/").data["role"], "super_admin")

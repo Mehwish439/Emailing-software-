@@ -114,10 +114,10 @@ export default function CompanyMembers() {
 
       <Modal open={!!link} onClose={() => setLink(null)} title="Invitation link" footer={<button className="btn-primary" onClick={() => setLink(null)}>Done</button>}>
         {link && (<div className="space-y-3">
-          <Notice tone={link.emailed ? "ok" : "warn"}>{link.emailed ? `An invitation email was sent to ${link.email}.` : `No email was sent automatically. Share this single-use link with ${link.email} yourself.`}</Notice>
+          <Notice tone={link.emailed ? "ok" : "warn"}>{link.emailed ? `The email provider accepted the message for ${link.email}. It can still land in spam or fail to arrive - if so, send them the link below yourself.` : `No email was sent automatically. Send this link to ${link.email} yourself.`}</Notice>
           <input readOnly className="input" aria-label="Invitation link" value={link.url} onFocus={(e) => e.target.select()} />
           <button className="btn-secondary" onClick={() => navigator.clipboard?.writeText(link.url).then(() => showToast("Link copied.", "success"))}>Copy link</button>
-          <p className="text-xs text-slate-500">The link expires after 7 days and stops working once the password is set. Treat it like a password: it is shown only once, and only when the email could not be sent.</p>
+          <p className="text-xs text-slate-500">The link expires after 7 days and stops working once the password is set. Treat it like a password: keep it private. You can re-issue a new link at any time.</p>
         </div>)}
       </Modal>
 

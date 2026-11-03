@@ -39,7 +39,7 @@ def read_invite_token(token):
 
 def invite_url(user):
     base = getattr(settings, "FRONTEND_URL", "").rstrip("/")
-    return f"{base}/accept-invite?token={make_invite_token(user)}"
+    return f"{base}/join?token={make_invite_token(user)}"
 
 
 def paginate(request, items, default=25, maximum=200):

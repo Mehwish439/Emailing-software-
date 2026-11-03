@@ -26,6 +26,8 @@ def send_link_email(user, url, *, kind="invite"):
         f"The link works once and expires in 7 days.</p>"
         f'<p><a href="{url}" style="background:#2b47dd;color:#fff;padding:10px 18px;border-radius:6px;'
         f'text-decoration:none">Set your password</a></p>'
+        f'<p style="font-size:13px;color:#555">If the button does not work, copy this link into your browser:<br>'
+        f'<a href="{url}">{url}</a></p>'
         "<p>If you did not expect this email you can ignore it.</p>"
     )
     try:
@@ -41,6 +43,10 @@ def send_link_email(user, url, *, kind="invite"):
 
 
 def link_payload(user, url, *, kind="invite"):
-    """Response fragment: the link is returned to the authorised admin ONLY when email could not be sent."""
+    """
+    Response fragment for the AUTHORISED admin who created/re-issued the link. The link is always returned:
+    "email_sent" only means the provider ACCEPTED the message - it may still land in spam, bounce, or never
+    arrive (e.g. unverified sender), and the admin must always have a way to hand the link over.
+    """
     sent = send_link_email(user, url, kind=kind)
-    return {"email_sent": sent, "invite_url": None if sent else url}
+    return {"email_sent": sent, "invite_url": url}

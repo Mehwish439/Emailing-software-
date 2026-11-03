@@ -36,5 +36,12 @@ class User(AbstractUser):
     USERNAME_FIELD = "username"
     REQUIRED_FIELDS = ["email"]
 
+    def save(self, *args, **kwargs):
+        # A Django superuser (e.g. created with `createsuperuser`) is the platform owner. Keep the role field in
+        # step so every screen and API agrees; the backend already treated is_superuser as platform admin.
+        if self.is_superuser and self.role != self.Role.SUPER_ADMIN:
+            self.role = self.Role.SUPER_ADMIN
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.email or self.username

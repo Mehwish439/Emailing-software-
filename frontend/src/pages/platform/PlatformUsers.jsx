@@ -43,10 +43,10 @@ export default function PlatformUsers() {
           {u.id !== me.id && <button className={u.is_active ? "btn-danger px-2 py-1" : "btn-secondary px-2 py-1"} onClick={() => setConfirm({ id: u.id, action: u.is_active ? "deactivate" : "activate", email: u.email })}>{u.is_active ? "Deactivate" : "Activate"}</button>}</div>) }]} /><PageFooter data={d} onPage={setPage} /></>)}</Async></div>
       <ConfirmDialog open={!!confirm} onClose={() => setConfirm(null)} onConfirm={toggle} danger={confirm?.action === "deactivate"} title={`${confirm?.action === "deactivate" ? "Deactivate" : "Activate"} user`} message={`${confirm?.action === "deactivate" ? "Deactivate" : "Activate"} ${confirm?.email}?`} confirmLabel="Confirm" />
       <Modal open={!!link} onClose={() => setLink(null)} title="Single-use link" footer={<button className="btn-primary" onClick={() => setLink(null)}>Done</button>}>
-        {link && (<div className="space-y-3"><Notice tone={link.emailed ? "ok" : "warn"}>{link.emailed ? `Emailed to ${link.email}.` : `No email was sent automatically. Give this link to ${link.email} yourself.`}</Notice>
+        {link && (<div className="space-y-3"><Notice tone={link.emailed ? "ok" : "warn"}>{link.emailed ? `The email provider accepted the message for ${link.email}. It can still land in spam or fail to arrive - if so, send them the link below yourself.` : `No email was sent automatically. Send this link to ${link.email} yourself.`}</Notice>
           <input readOnly aria-label="Link" className="input" value={link.url} onFocus={(e) => e.target.select()} />
           <button className="btn-secondary" onClick={() => navigator.clipboard?.writeText(link.url).then(() => showToast("Link copied.", "success"))}>Copy link</button>
-          <p className="text-xs text-slate-500">Expires in 7 days; works once; shown only now.</p></div>)}
+          <p className="text-xs text-slate-500">Expires in 7 days; works once. Keep it private.</p></div>)}
       </Modal>
     </div>
   );

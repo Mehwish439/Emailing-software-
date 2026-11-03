@@ -57,22 +57,30 @@ export default function AcceptInvitePage() {
       <div className="w-full max-w-lg">
         <div className="flex justify-center mb-6"><div className="h-10 px-3 rounded-lg bg-brand-600 flex items-center text-white font-bold text-lg">QRM</div></div>
         <div className="card p-8">
-          <h1 className="text-xl font-semibold text-slate-900 text-center">Join your company</h1>
+          <h1 className="text-xl font-semibold text-slate-900 text-center">{info && !info.first_time ? "Reset your password" : "Join your company"}</h1>
           <div className="mt-5 grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1" role="tablist" aria-label="Sign-up type">
             <Link role="tab" aria-selected="false" to="/signup" className="rounded-md px-2 py-2 text-center text-sm font-medium text-slate-600 hover:text-slate-900">Create a new company</Link>
             <span role="tab" aria-selected="true" className="rounded-md bg-white px-2 py-2 text-center text-sm font-medium text-brand-700 shadow-sm">Join an existing company</span>
           </div>
 
-          {!info ? (
-            <div className="mt-5 space-y-4">
-              <p className="text-sm text-slate-600">Paste the invitation link (or code) your company administrator sent you. You cannot join without one.</p>
-              {lookupError && <Notice tone="error">{lookupError}</Notice>}
-              <Field label="Invitation link or code" htmlFor="jn-code"><textarea id="jn-code" rows={3} className="input" value={code} onChange={(e) => setCode(e.target.value)} /></Field>
-              <button className="btn-primary w-full" onClick={() => lookup(code)} disabled={!code.trim()}>Continue</button>
-            </div>
-          ) : (
+          <div className="mt-5 space-y-3">
+            <p className="text-sm text-slate-600">
+              {info ? "Invitation verified. Complete the form below." : "Paste the invitation link (or code) your company administrator sent you. Opening the link from your email fills this box automatically."}
+            </p>
+            {lookupError && <Notice tone="error">{lookupError}</Notice>}
+            <Field label="Invitation link or code" htmlFor="jn-code">
+              <textarea id="jn-code" rows={info ? 2 : 3} className="input text-xs" value={code} onChange={(e) => { setCode(e.target.value); setInfo(null); }} />
+            </Field>
+            {!info && <button className="btn-primary w-full" onClick={() => lookup(code)} disabled={!code.trim()}>Continue</button>}
+          </div>
+
+          {info && (
             <form onSubmit={submit} className="mt-5 space-y-4">
-              <Notice tone="info">You are joining <b>{info.company || "your company"}</b> as a {info.role === "company_admin" ? "Company Admin" : "regular user"}. Invitation for {info.email}.</Notice>
+              <Notice tone="info">
+                {info.first_time
+                  ? <>You are joining <b>{info.company || "your company"}</b> as a {info.role === "company_admin" ? "Company Admin" : "regular user"}. Invitation for {info.email}.</>
+                  : <>Set a new password for <b>{info.email}</b>.</>}
+              </Notice>
               {errors.form && <Notice tone="error">{errors.form}</Notice>}
               <div className="grid grid-cols-2 gap-3">
                 <Field label="First name" htmlFor="jn-fn"><input id="jn-fn" required className="input" value={form.first_name} onChange={set("first_name")} /></Field>
@@ -81,7 +89,7 @@ export default function AcceptInvitePage() {
               <Field label="Work email" htmlFor="jn-em" error={errors.email} hint="Must match the email the invitation was sent to."><input id="jn-em" type="email" required className="input" autoComplete="email" value={form.email} onChange={set("email")} /></Field>
               <Field label="Password" htmlFor="jn-pw" error={errors.password}><input id="jn-pw" type="password" required minLength={8} className="input" autoComplete="new-password" value={form.password} onChange={set("password")} /></Field>
               <Field label="Confirm password" htmlFor="jn-pc" error={errors.password_confirm}><input id="jn-pc" type="password" required className="input" autoComplete="new-password" value={form.password_confirm} onChange={set("password_confirm")} /></Field>
-              <button className="btn-primary w-full" disabled={busy}>{busy ? "Saving…" : "Join company"}</button>
+              <button className="btn-primary w-full" disabled={busy}>{busy ? "Saving…" : info.first_time ? "Join company" : "Save new password"}</button>
             </form>
           )}
           <p className="mt-5 text-center text-sm text-slate-500">Already have an account? <Link to="/login" className="text-brand-600 font-medium hover:underline">Sign in</Link></p>

@@ -157,7 +157,7 @@ class CompanyAdminTests(TenantBase):
         u = User.objects.get(email="new@example.com")
         self.assertEqual((u.company_id, u.role, u.daily_quota), (self.acme.id, "user", 300))
         self.assertFalse(u.has_usable_password())
-        self.assertIn("accept-invite?token=", r.data["invite_url"])
+        self.assertIn("/join?token=", r.data["invite_url"])
         self.assertTrue(AuditLog.objects.filter(company=self.acme, action="user.invited").exists())
 
     def test_invite_respects_seat_limit_and_duplicates(self):
@@ -436,7 +436,7 @@ class PlatformAdminTests(TenantBase):
 
     def test_user_deactivate_and_reset_invite_never_expose_passwords(self):
         r = self.client.post(f"/api/platform/users/{self.acme_user.id}/reset-invite/")
-        self.assertIn("accept-invite?token=", r.data["invite_url"])
+        self.assertIn("/join?token=", r.data["invite_url"])
         self.assertNotIn("password", str({k: v for k, v in r.data.items() if k != "invite_url"}).lower())
         self.assertFalse(self.client.post(f"/api/platform/users/{self.acme_user.id}/deactivate/").data["is_active"])
         self.assertEqual(self.client.post(f"/api/platform/users/{self.root.id}/deactivate/").status_code, 400)

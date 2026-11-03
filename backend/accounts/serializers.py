@@ -18,6 +18,12 @@ class UserSerializer(serializers.ModelSerializer):
                   "role", "company", "daily_quota", "monthly_quota", "quota"]
         read_only_fields = ["id", "date_joined", "role", "company", "daily_quota", "monthly_quota", "quota"]
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.is_superuser:          # also covers superusers created before the role was synced on save
+            data["role"] = "super_admin"
+        return data
+
     def get_company(self, obj):
         return {"id": obj.company_id, "name": obj.company.name} if obj.company_id else None
 
