@@ -1,0 +1,27 @@
+# Python / Django
+backend/venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+backend/.env
+backend/staticfiles/
+backend/db.sqlite3
+backend/test_db.sqlite3
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# --- SMTP deployment package: never commit real configuration or secrets ---
+deployment/self-hosted-smtp/requirements.env
+deployment/self-hosted-smtp/*.key
+deployment/self-hosted-smtp/*.pem
+deployment/self-hosted-smtp/__pycache__/
+*.private
+venv
