@@ -1,0 +1,3 @@
+-r requirements.txt
+# Real local SMTP server used by providers/tests.py (no mocks for SMTP behaviour)
+aiosmtpd>=1.4,<2.0

@@ -1,0 +1,105 @@
+# =============================================================================
+# MailFlow outbound Postfix -- main.cf TEMPLATE (rendered by configure-postfix.sh)
+# Every double-@ placeholder below is replaced from requirements.env. Do not edit the rendered file by hand;
+# edit requirements.env or this template and re-run configure-postfix.sh (it is idempotent).
+# =============================================================================
+
+# ---- identity -------------------------------------------------------------------
+myhostname = @@SMTP_HOSTNAME@@
+mydomain = @@SENDING_DOMAIN@@
+myorigin = $mydomain
+smtpd_banner = $myhostname ESMTP
+# We never accept mail for ourselves except via the relay_domains bounce path below.
+mydestination = localhost
+inet_interfaces = all
+inet_protocols = @@INET_PROTOCOLS@@
+# Only loopback is trusted. Application servers authenticate (SASL); they are NEVER added here.
+mynetworks = 127.0.0.0/8 [::1]/128
+compatibility_level = 3.6
+biff = no
+append_dot_mydomain = no
+recipient_delimiter = +
+
+# ---- NO OPEN RELAY ----------------------------------------------------------------
+# Relaying is allowed only for SASL-authenticated clients (submission port) or loopback.
+smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination
+smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination
+smtpd_helo_required = yes
+disable_vrfy_command = yes
+smtpd_data_restrictions = reject_unauth_pipelining
+smtpd_delay_reject = yes
+
+# ---- bounce intake (VERP return-paths) ----------------------------------------------
+# Mail for @@BOUNCE_DOMAIN@@ is accepted ONLY for bounce+...@ addresses and piped to the forwarder.
+relay_domains = @@BOUNCE_DOMAIN@@
+relay_recipient_maps = regexp:/etc/postfix/bounce_recipients.regexp
+transport_maps = hash:/etc/postfix/transport
+
+# ---- SASL (submission authentication) ------------------------------------------------
+smtpd_sasl_type = cyrus
+smtpd_sasl_path = smtpd
+smtpd_sasl_auth_enable = no
+smtpd_sasl_security_options = noanonymous, noplaintext
+smtpd_sasl_tls_security_options = noanonymous
+smtpd_sasl_local_domain = $myhostname
+broken_sasl_auth_clients = yes
+# An authenticated client may only send as the domains this server signs for.
+smtpd_sender_login_maps = regexp:/etc/postfix/sender_login.regexp
+
+# ---- TLS --------------------------------------------------------------------------------
+smtpd_tls_cert_file = @@TLS_CERT_FILE_RESOLVED@@
+smtpd_tls_key_file = @@TLS_KEY_FILE_RESOLVED@@
+smtpd_tls_security_level = may
+smtpd_tls_auth_only = yes
+smtpd_tls_protocols = >=TLSv1.2
+smtpd_tls_mandatory_protocols = >=TLSv1.2
+smtpd_tls_mandatory_ciphers = medium
+smtpd_tls_loglevel = 1
+smtpd_tls_received_header = yes
+smtp_tls_security_level = may
+smtp_tls_protocols = >=TLSv1.2
+smtp_tls_loglevel = 1
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+
+# ---- DKIM (OpenDKIM milter) ------------------------------------------------------------
+milter_protocol = 6
+milter_default_action = tempfail
+smtpd_milters = inet:127.0.0.1:12301
+non_smtpd_milters = $smtpd_milters
+
+# ---- queue, retries, pacing -------------------------------------------------------------
+maximal_queue_lifetime = @@MAX_QUEUE_LIFETIME@@
+bounce_queue_lifetime = @@MAX_QUEUE_LIFETIME@@
+minimal_backoff_time = 300s
+maximal_backoff_time = 3600s
+queue_run_delay = 300s
+message_size_limit = @@MESSAGE_SIZE_LIMIT@@
+# Per receiving domain: how many parallel connections and the delay between messages.
+default_destination_concurrency_limit = @@DEST_CONCURRENCY@@
+default_destination_rate_delay = @@DEST_RATE_DELAY@@
+smtp_destination_concurrency_limit = @@DEST_CONCURRENCY@@
+smtp_destination_rate_delay = @@DEST_RATE_DELAY@@
+# GLOBAL ingress cap: messages per minute accepted from any one client (the application).
+anvil_rate_time_unit = 60s
+smtpd_client_message_rate_limit = @@GLOBAL_RATE_PER_MINUTE@@
+smtpd_client_connection_rate_limit = 60
+smtpd_client_connection_count_limit = 10
+@@RATE_PARAMS@@
+smtpd_error_sleep_time = 2s
+smtpd_soft_error_limit = 5
+smtpd_hard_error_limit = 10
+
+# ---- bounces / notices ---------------------------------------------------------------------
+notify_classes = resource, software
+soft_bounce = no
+default_process_limit = 50
+
+# ---- PRODUCTION SAFETY SWITCH -------------------------------------------------------------------
+# While this line exists, outbound internet delivery is HELD in the queue. activate-production.sh
+# removes it only after DNS/TLS validation passes and you confirm host authorisation.
+@@DEFER_LINE@@
+
+# ---- misc -------------------------------------------------------------------------------------------
+alias_maps = hash:/etc/aliases
+alias_database = hash:/etc/aliases
+mailbox_size_limit = 0

@@ -1,0 +1,26 @@
+# =============================================================================
+# MailFlow OpenDKIM -- opendkim.conf TEMPLATE (rendered by configure-opendkim.sh)
+# =============================================================================
+Syslog                  yes
+SyslogSuccess           yes
+LogWhy                  yes
+UMask                   007
+# Postfix connects to this local TCP socket (smtpd_milters = inet:127.0.0.1:12301). Loopback only.
+Socket                  inet:12301@127.0.0.1
+PidFile                 /run/opendkim/opendkim.pid
+UserID                  opendkim:opendkim
+# Sign only; this server does not verify inbound DKIM.
+Mode                    s
+Canonicalization        relaxed/simple
+SignatureAlgorithm      rsa-sha256
+OversignHeaders         From
+SubDomains              no
+AutoRestart             yes
+AutoRestartRate         10/1M
+# One key per sending domain, selected by the From domain.
+KeyTable                refile:/etc/opendkim/KeyTable
+SigningTable            refile:/etc/opendkim/SigningTable
+# Loopback is "internal". SASL-authenticated submissions (the application) are signed via the
+# {auth_type} macro Postfix passes to the milter by default.
+InternalHosts           refile:/etc/opendkim/TrustedHosts
+ExternalIgnoreList      refile:/etc/opendkim/TrustedHosts

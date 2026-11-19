@@ -1,0 +1,13 @@
+[Unit]
+Description=MailFlow SMTP health check (writes /var/lib/mailflow-smtp/health.json)
+After=postfix.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mailflow-health-check --write
+# Nagios-style non-zero exits are results, not service failures.
+SuccessExitStatus=1 2
+ProtectSystem=strict
+ReadWritePaths=/var/lib/mailflow-smtp
+PrivateTmp=true
+NoNewPrivileges=true

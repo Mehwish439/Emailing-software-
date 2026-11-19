@@ -1,0 +1,5 @@
+# Hosts whose mail OpenDKIM treats as internal/originating. Loopback ONLY.
+# Do NOT add application-server IPs here: they authenticate with SASL and are signed that way.
+127.0.0.1
+::1
+localhost

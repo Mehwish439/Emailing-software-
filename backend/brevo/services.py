@@ -1,0 +1,172 @@
+"""
+Business-logic layer around the Brevo client. This is what campaigns/services.py
+calls — it never talks to brevo/client.py directly.
+"""
+import logging
+
+from django.conf import settings
+
+from common.exceptions import BrevoAPIError
+from contacts.unsubscribe import generate_unsubscribe_token
+from email_templates.rendering import render_template_for_contact
+
+from .client import BrevoClient
+
+logger = logging.getLogger(__name__)
+
+
+def _sender_payload(campaign):
+    return {"name": campaign.sender_name, "email": campaign.sender_email}
+
+
+def _build_unsubscribe_url(contact_id, campaign_id=None):
+    token = generate_unsubscribe_token(contact_id, campaign_id)
+    return f"{settings.BACKEND_BASE_URL}/api/unsubscribe/{token}/"
+
+
+def _sample_contact_for_test(campaign, test_email):
+    """
+    Test sends aren't tied to a real CampaignRecipient, but the template
+    still needs *some* contact to pull {{variable}} values from. Prefer a
+    real eligible contact from the campaign's own lists (so the test email
+    shows real data); fall back to a placeholder with everything but email
+    blank if the campaign has no contacts yet.
+    """
+    sample = campaign.eligible_contacts_queryset().first()
+    if sample is not None:
+        return sample
+
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        first_name="", last_name="", email=test_email, phone="", full_name=test_email, attributes={},
+    )
+
+
+def send_test_email(campaign, test_email, variant=None):
+    """
+    Sends a one-off test email for a campaign via Brevo's transactional endpoint.
+    Raises BrevoAPIError on failure — never silently swallowed.
+
+    Renders {{variable}} merge tags using a sample contact (see
+    _sample_contact_for_test) so the test reflects what a real recipient
+    would see. Test sends don't unsubscribe anyone real, so
+    {{unsubscribe_url}} is replaced with a harmless "#" placeholder rather
+    than a working link, and no List-Unsubscribe header is set.
+
+    `variant` (optional): an ab_testing.CampaignVariant belonging to this
+    campaign. When given, tests THAT version's subject/template instead of
+    the campaign's own (Version-A-mirrored) subject/template — see
+    campaigns/views.py's send_test action.
+    """
+    client = BrevoClient()
+    sample_contact = _sample_contact_for_test(campaign, test_email)
+    subject_source = variant.subject if variant else campaign.subject
+    html_source = variant.template.html_content if variant else campaign.template.html_content
+    subject, html_content = render_template_for_contact(
+        f"[TEST] {subject_source}",
+        html_source,
+        sample_contact,
+        extra_fields={"unsubscribe_url": "#"},
+    )
+    tags = ["test-email", f"campaign-{campaign.id}"]
+    if variant:
+        tags.append(f"ab-variant-{variant.label}")
+    return client.send_transactional_email(
+        sender=_sender_payload(campaign),
+        to=[{"email": test_email}],
+        subject=subject,
+        html_content=html_content,
+        tags=tags,
+    )
+
+
+def send_to_recipient(campaign, recipient):
+    """
+    Sends the campaign email to a single CampaignRecipient via Brevo's transactional
+    endpoint. Returns the Brevo response payload; raises BrevoAPIError on failure.
+
+    The email itself (merge tags, per-recipient unsubscribe URL, List-Unsubscribe headers,
+    A/B variant selection) is now produced by providers.builder.build_campaign_email so the
+    Brevo and self-hosted SMTP providers share one implementation of that logic. Behaviour
+    for Brevo is unchanged. NOTE: campaigns.services no longer calls this directly -- it goes
+    through providers.dispatch (idempotency, quota, provider selection); this function stays
+    for backward compatibility and direct use.
+    """
+    from providers.builder import build_campaign_email
+
+    client = BrevoClient()
+    email = build_campaign_email(campaign, recipient)
+    return client.send_transactional_email(
+        sender={"name": email.sender_name, "email": email.sender_email},
+        to=[{"email": email.to_email, "name": email.to_name}],
+        subject=email.subject,
+        html_content=email.html,
+        tags=email.tags,
+        headers=email.headers,
+    )
+
+
+def send_automation_email(automation, step, execution, contact):
+    """
+    Sends ONE Marketing Automation email through the same Brevo client/config as campaigns.
+    Returns Brevo's response payload (contains "messageId"); raises BrevoAPIError on failure so the
+    automation engine (automations/services.py) can log it and decide whether to retry.
+
+    - Sender: automation.sender_name/sender_email if set, else the existing BREVO_SENDER_* settings.
+    - Subject: step.configuration["subject"] if set, else the template's own subject.
+    - Same {{merge tags}}, working {{unsubscribe_url}} and List-Unsubscribe headers as campaigns
+      (the unsubscribe token has no campaign id; contacts/views.py handles that already).
+    - Tagged/headed with automation ids so brevo/webhooks.py can attribute delivery/open/click/
+      bounce/unsubscribe events back to the execution.
+    """
+    client = BrevoClient()
+    template = step.email_template
+    unsubscribe_url = _build_unsubscribe_url(contact.id)
+    subject_source = (step.configuration or {}).get("subject") or template.subject
+    subject, html_content = render_template_for_contact(
+        subject_source, template.html_content, contact, extra_fields={"unsubscribe_url": unsubscribe_url},
+    )
+    sender = {
+        "name": automation.sender_name or settings.BREVO_SENDER_NAME,
+        "email": automation.sender_email or settings.BREVO_SENDER_EMAIL,
+    }
+    return client.send_transactional_email(
+        sender=sender,
+        to=[{"email": contact.email, "name": contact.full_name}],
+        subject=subject,
+        html_content=html_content,
+        tags=[f"automation-{automation.id}", f"automation-exec-{execution.id}"],
+        headers={
+            "X-Automation-Id": str(automation.id),
+            "X-Automation-Execution-Id": str(execution.id),
+            "List-Unsubscribe": f"<{unsubscribe_url}>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
+    )
+
+
+def create_and_send_campaign_via_brevo(campaign):
+    """
+    Alternative path: registers the campaign as a native Brevo Email Campaign
+    object (useful for provider-side reporting) and triggers sendNow.
+    Not used for per-recipient dispatch — see campaigns/services.py, which
+    sends per-recipient via send_to_recipient() so our own CampaignRecipient
+    status tracking stays authoritative. This is kept for optional provider
+    parity.
+    """
+    client = BrevoClient()
+    try:
+        created = client.create_email_campaign(
+            name=campaign.name,
+            subject=campaign.subject,
+            sender=_sender_payload(campaign),
+            html_content=campaign.template.html_content,
+        )
+        brevo_id = created.get("id")
+        if brevo_id:
+            client.send_email_campaign_now(brevo_id)
+        return brevo_id
+    except BrevoAPIError:
+        logger.exception("Failed to create/send native Brevo campaign for campaign_id=%s", campaign.id)
+        raise
