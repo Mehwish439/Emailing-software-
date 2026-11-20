@@ -1,0 +1,22 @@
+from django.contrib import admin
+from django.urls import include, path
+
+from common.views import health_check
+
+urlpatterns = [
+    path("admin/", admin.site.urls),
+    path("api/health/", health_check, name="health-check"),
+
+    path("api/auth/", include("accounts.urls")),
+    path("api/", include("contacts.urls")),
+    path("api/", include("email_templates.urls")),
+    path("api/", include("campaigns.urls")),
+    path("api/", include("ab_testing.urls")),
+    path("api/", include("scheduling.urls")),
+    path("api/", include("analytics.urls")),
+    path("api/brevo/", include("brevo.urls")),
+    path("api/providers/", include("providers.urls")),
+    path("api/", include("tenancy.urls")),  # NEW (company-admin + platform-admin APIs)  # NEW (SMTP bounce intake)
+    path("api/", include("signup_forms.urls")),  # NEW (Signup Forms feature)
+    path("api/", include("automations.urls")),  # NEW (Marketing Automation feature)
+]

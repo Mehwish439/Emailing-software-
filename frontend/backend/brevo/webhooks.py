@@ -1,0 +1,257 @@
+"""
+Processes inbound Brevo webhook events.
+
+Brevo's webhook payloads vary slightly by event but generally include:
+  event: "delivered" | "opened" | "click" | "soft_bounce" | "hard_bounce" |
+         "blocked" | "spam" | "unsubscribed" | ...
+  email: recipient email address
+  message-id / messageId: the transactional message id
+  date / ts: event timestamp
+  tags: list of tags we sent (contains "campaign-<id>")
+
+We identify the campaign either from the X-Campaign-Id / X-Recipient-Id
+metadata we set when sending, or by parsing the "campaign-<id>" tag.
+Idempotency is enforced with a `dedupe_key` unique constraint built from
+message-id + event type (falls back to email+event+timestamp if no message id).
+"""
+import logging
+import re
+
+from django.utils.dateparse import parse_datetime
+from django.utils.timezone import is_naive, make_aware
+
+from campaigns.models import Campaign, CampaignRecipient
+from contacts.models import Contact
+from contacts.services_suppression import add_suppression
+
+logger = logging.getLogger(__name__)
+
+# Maps Brevo's event names to our internal enums.
+EVENT_MAP = {
+    "delivered": "delivered",
+    "opened": "opened",
+    "unique_opened": "opened",
+    "click": "clicked",
+    "clicked": "clicked",
+    "soft_bounce": "soft_bounce",
+    "hard_bounce": "hard_bounce",
+    "blocked": "blocked",
+    "spam": "spam",
+    "unsubscribed": "unsubscribed",
+    "invalid_email": "hard_bounce",
+}
+
+RECIPIENT_STATUS_MAP = {
+    "delivered": CampaignRecipient.Status.DELIVERED,
+    "opened": CampaignRecipient.Status.OPENED,
+    "clicked": CampaignRecipient.Status.CLICKED,
+    "soft_bounce": CampaignRecipient.Status.BOUNCED,
+    "hard_bounce": CampaignRecipient.Status.BOUNCED,
+    "blocked": CampaignRecipient.Status.BLOCKED,
+    "spam": CampaignRecipient.Status.SPAM,
+    "unsubscribed": CampaignRecipient.Status.UNSUBSCRIBED,
+}
+
+SUPPRESSION_REASON_MAP = {
+    "hard_bounce": "hard_bounce",
+    "blocked": "blocked",
+    "spam": "spam_complaint",
+    "unsubscribed": "unsubscribed",
+}
+
+CAMPAIGN_TAG_RE = re.compile(r"campaign-(\d+)")
+
+
+class WebhookProcessingError(Exception):
+    pass
+
+
+def _extract_campaign_id(payload):
+    headers = payload.get("headers") or {}
+    if headers.get("X-Campaign-Id"):
+        try:
+            return int(headers["X-Campaign-Id"])
+        except (TypeError, ValueError):
+            pass
+    for tag in payload.get("tags", []) or []:
+        match = CAMPAIGN_TAG_RE.search(str(tag))
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _extract_recipient_id(payload):
+    headers = payload.get("headers") or {}
+    value = headers.get("X-Recipient-Id")
+    try:
+        return int(value) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_timestamp(payload):
+    raw = payload.get("date") or payload.get("ts_event") or payload.get("ts")
+    if raw is None:
+        from django.utils import timezone
+
+        return timezone.now()
+    if isinstance(raw, (int, float)):
+        from datetime import datetime, timezone as dt_timezone
+
+        return datetime.fromtimestamp(raw, tz=dt_timezone.utc)
+    parsed = parse_datetime(str(raw))
+    if parsed is None:
+        from django.utils import timezone
+
+        return timezone.now()
+    if is_naive(parsed):
+        parsed = make_aware(parsed)
+    return parsed
+
+
+def escalate_soft_bounces(email):
+    """
+    Suppress an address after N CONSECUTIVE soft bounces (no 'delivered' event in between) inside the
+    window. Thresholds: settings.SOFT_BOUNCE_SUPPRESS_THRESHOLD (0 disables) / SOFT_BOUNCE_WINDOW_DAYS.
+    Shared by the Brevo webhook and the SMTP bounce intake (both call process_webhook_event), and safe
+    to run repeatedly because process_webhook_event de-duplicates events before reaching here.
+    """
+    from datetime import timedelta
+
+    from django.conf import settings
+    from django.utils import timezone
+
+    from analytics.models import CampaignEvent
+
+    threshold = getattr(settings, "SOFT_BOUNCE_SUPPRESS_THRESHOLD", 0)
+    if threshold <= 0:
+        return False
+    since = timezone.now() - timedelta(days=settings.SOFT_BOUNCE_WINDOW_DAYS)
+    events = CampaignEvent.objects.filter(contact__email__iexact=email, timestamp__gte=since,
+                                          event_type__in=["soft_bounce", "delivered"]).order_by("-timestamp")
+    streak = 0
+    for ev in events.values_list("event_type", flat=True)[:threshold + 5]:
+        if ev == "delivered":
+            break
+        streak += 1
+    if streak >= threshold:
+        add_suppression(email, "soft_bounce_limit")
+        logger.info("Suppressed %s after %s consecutive soft bounces", email, streak)
+        return True
+    return False
+
+
+def process_webhook_event(payload: dict):
+    """
+    Processes a single Brevo webhook event payload.
+    Returns a short string describing the outcome (for logging/testing).
+    Idempotent: calling this twice with the same message-id + event is a no-op
+    the second time.
+    """
+    from analytics.models import CampaignEvent
+
+    brevo_event = (payload.get("event") or "").strip().lower()
+    internal_event = EVENT_MAP.get(brevo_event)
+    if internal_event is None:
+        logger.info("Ignoring unhandled Brevo event type: %s", brevo_event)
+        return "ignored-unhandled-event"
+
+    email = (payload.get("email") or "").strip().lower()
+    if not email:
+        raise WebhookProcessingError("Webhook payload missing recipient email.")
+
+    message_id = payload.get("message-id") or payload.get("messageId") or ""
+    dedupe_key = f"{message_id}:{internal_event}" if message_id else f"{email}:{internal_event}:{payload.get('date', '')}"
+
+    if CampaignEvent.objects.filter(dedupe_key=dedupe_key).exists():
+        return "duplicate-ignored"
+
+    campaign_id = _extract_campaign_id(payload)
+    campaign = Campaign.objects.filter(id=campaign_id).first() if campaign_id else None
+    if campaign is None:
+        # Marketing Automation emails carry automation headers/tags instead of a campaign id.
+        # Handle them here (stats + suppression + cancelling that contact's enrollments) rather
+        # than dropping the event — a hard bounce / unsubscribe must still suppress the email.
+        from automations.services import handle_automation_webhook
+
+        automation_outcome = handle_automation_webhook(payload, internal_event, email, _extract_timestamp(payload))
+        if automation_outcome is not None:
+            return automation_outcome
+        logger.warning("Webhook event for unknown/missing campaign_id=%s email=%s", campaign_id, email)
+        return "ignored-unknown-campaign"
+
+    contact = Contact.objects.filter(owner=campaign.created_by, email__iexact=email).first()
+    if contact is None:
+        logger.warning("Webhook event for unknown contact email=%s under campaign=%s", email, campaign.id)
+        return "ignored-unknown-contact"
+
+    recipient_id = _extract_recipient_id(payload)
+    recipient = None
+    if recipient_id:
+        recipient = CampaignRecipient.objects.filter(id=recipient_id, campaign=campaign).first()
+    if recipient is None:
+        recipient = CampaignRecipient.objects.filter(campaign=campaign, contact=contact).first()
+
+    timestamp = _extract_timestamp(payload)
+
+    metadata = dict(payload)
+    if internal_event == "clicked":
+        # Brevo's own click-tracking system (which wraps every <a href> in
+        # the sent HTML, including the unsubscribe link) is what actually
+        # counts these clicks — we only ever learn about it via whatever
+        # this webhook payload includes. Brevo's documented field for the
+        # clicked URL is "link" — checking a couple of alternate spellings
+        # defensively in case that varies by payload version. If NONE of
+        # these are present, per-URL breakdown simply won't be available
+        # for that event (still counted as a generic click) — inspect a
+        # real stored payload (CampaignEvent.objects.filter(event_type=
+        # "clicked").first().metadata) to confirm exactly what your Brevo
+        # account sends, since this can change over time / by plan.
+        clicked_url = payload.get("link") or payload.get("url") or payload.get("URL") or ""
+        metadata["clicked_url"] = clicked_url
+        # is_bot is intentionally NOT set here: unlike the unsubscribe view
+        # above (a real request hitting OUR server, where we control
+        # User-Agent/IP directly), a click on a template link goes through
+        # Brevo's own tracking redirect — we never see that original
+        # request, only whatever Brevo forwards afterward, which may not
+        # include a reliable User-Agent/IP for classification at all.
+
+    CampaignEvent.objects.create(
+        campaign=campaign,
+        contact=contact,
+        recipient=recipient,
+        event_type=internal_event,
+        timestamp=timestamp,
+        metadata=metadata,
+        dedupe_key=dedupe_key,
+    )
+
+    if recipient and internal_event in RECIPIENT_STATUS_MAP:
+        new_status = RECIPIENT_STATUS_MAP[internal_event]
+        # Don't downgrade e.g. "clicked" back to "delivered" if events arrive out of order.
+        status_priority = [
+            CampaignRecipient.Status.PENDING, CampaignRecipient.Status.SENT,
+            CampaignRecipient.Status.DELIVERED, CampaignRecipient.Status.OPENED,
+            CampaignRecipient.Status.CLICKED,
+        ]
+        terminal_negative = {
+            CampaignRecipient.Status.BOUNCED, CampaignRecipient.Status.BLOCKED,
+            CampaignRecipient.Status.SPAM, CampaignRecipient.Status.UNSUBSCRIBED,
+        }
+        if new_status in terminal_negative or new_status not in status_priority or recipient.status not in status_priority:
+            recipient.status = new_status
+        else:
+            if status_priority.index(new_status) > status_priority.index(recipient.status):
+                recipient.status = new_status
+        recipient.save(update_fields=["status", "updated_at"])
+
+    if internal_event in SUPPRESSION_REASON_MAP:
+        add_suppression(email, SUPPRESSION_REASON_MAP[internal_event])
+    elif internal_event == "soft_bounce":
+        escalate_soft_bounces(email)
+
+    from providers.dispatch import sync_state_from_event
+
+    sync_state_from_event(recipient, internal_event)
+
+    return f"processed:{internal_event}"

@@ -1,0 +1,47 @@
+# =============================================================================
+# DNS records for MailFlow self-hosted SMTP -- EXAMPLE. Replace every example.* value.
+# Publish these at your DNS provider, wait for propagation, then run:  sudo ./validate-smtp.sh dns
+# Assumed values:  SMTP_HOSTNAME=mail.send.example.com   SENDING_DOMAIN=send.example.com
+#                  BOUNCE_DOMAIN=bounce.example.com      SMTP_PUBLIC_IP=203.0.113.5   DKIM_SELECTOR=mf1
+# =============================================================================
+
+## 1. A record -- the server's name
+mail.send.example.com.            IN  A      203.0.113.5
+
+## 2. PTR / reverse DNS (rDNS)  -- set at your HOSTING PROVIDER, not in your DNS zone
+#    203.0.113.5  ->  mail.send.example.com
+#    It must forward-confirm: the A record above must point back to the same IP.
+#    Many receivers reject or junk mail from IPs with missing/mismatched PTR.
+
+## 3. SPF -- authorises this server's IP to send for the sending domain
+send.example.com.                 IN  TXT    "v=spf1 ip4:203.0.113.5 -all"
+#    Use ~all (soft fail) while testing, -all once you are sure. Only ONE v=spf1 record per name.
+#    The envelope (bounce) domain is checked too -- see record 6.
+
+## 4. DKIM -- public key generated on the server
+#    The exact record is in /root/mailflow-dns/<domain>.dkim.txt  (created by configure-opendkim.sh).
+#    Publish it verbatim (it is only the PUBLIC key; the private key never leaves the server):
+mf1._domainkey.send.example.com.  IN  TXT    ( "v=DKIM1; h=sha256; k=rsa; "
+          "p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...(from the .txt file)..." )
+
+## 5. DMARC -- policy + reports (start with p=none, move to quarantine/reject once reports are clean)
+_dmarc.send.example.com.          IN  TXT    "v=DMARC1; p=none; rua=mailto:dmarc-reports@example.com; adkim=r; aspf=r; fo=1"
+
+## 6. Bounce domain -- receives bounces/complaints (VERP return-paths)
+bounce.example.com.               IN  MX  10 mail.send.example.com.
+bounce.example.com.               IN  TXT    "v=spf1 ip4:203.0.113.5 -all"
+#    Without this MX, bounces never reach the application and bad addresses are never suppressed.
+
+## 7. Optional but recommended
+#    MTA-STS / TLS-RPT, and a CAA record restricting who may issue certificates for your domain:
+send.example.com.                 IN  CAA    0 issue "letsencrypt.org"
+#    Feedback loops (FBL): register this IP/domain with Gmail Postmaster Tools, Microsoft SNDS/JMRP and
+#    Yahoo's complaint feedback loop so complaints reach your bounce address.
+
+## Verify manually
+#   dig +short A    mail.send.example.com
+#   dig +short -x   203.0.113.5
+#   dig +short TXT  send.example.com
+#   dig +short TXT  mf1._domainkey.send.example.com
+#   dig +short TXT  _dmarc.send.example.com
+#   dig +short MX   bounce.example.com
