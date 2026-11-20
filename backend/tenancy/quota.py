@@ -50,6 +50,40 @@ def usage(*, user=None, company=None, platform=False, day=None):
     return daily, monthly
 
 
+def provider_limits(provider):
+    """(daily, monthly) message allowance configured for one provider; None = not limited here."""
+    from django.conf import settings
+
+    if provider == "sendpulse":
+        return settings.SENDPULSE_DAILY_LIMIT or None, settings.SENDPULSE_MONTHLY_LIMIT or None
+    return None, None
+
+
+def provider_usage(provider, day=None):
+    """(daily_used, monthly_used) for the campaigns frozen to `provider`. Pre-upgrade campaigns have
+    provider "" and were sent by the platform default, so they count toward that provider."""
+    from django.conf import settings
+
+    day = day or timezone.localdate()
+    qs = QuotaLedger.objects.filter(campaign__provider=provider)
+    if provider == settings.EMAIL_PROVIDER:
+        qs = QuotaLedger.objects.filter(campaign__provider__in=[provider, ""])
+    return (_sum(qs.filter(usage_date=day)),
+            _sum(qs.filter(usage_date__year=day.year, usage_date__month=day.month)))
+
+
+def usage_by_provider(day=None):
+    """{provider: {daily_used, monthly_used, daily_limit, monthly_limit}} for every registered provider."""
+    from providers.registry import PROVIDERS
+
+    out = {}
+    for name in PROVIDERS:
+        d, m = provider_usage(name, day)
+        dl, ml = provider_limits(name)
+        out[name] = {"daily_used": d, "monthly_used": m, "daily_limit": dl, "monthly_limit": ml}
+    return out
+
+
 def quota_snapshot(user):
     """Everything the UI needs to render a user's quota card."""
     d_used, m_used = usage(user=user)
@@ -110,6 +144,13 @@ def reserve_campaign_quota(campaign):
             _check("company", None, cd, cm, needed, company.daily_limit, company.monthly_limit)
         pd, pm = usage(platform=True, day=day)
         _check("platform", None, pd, pm, needed, platform.daily_budget, platform.monthly_budget)
+        # Per-provider allowance (e.g. the SendPulse plan). Checked against the provider this campaign is
+        # frozen to, so Brevo and SendPulse each have their own budget.
+        if campaign.provider:
+            dl, ml = provider_limits(campaign.provider)
+            if dl or ml:
+                vd, vm = provider_usage(campaign.provider, day)
+                _check(campaign.provider, None, vd, vm, needed, dl, ml)
         QuotaLedger.objects.bulk_create(
             [QuotaLedger(user=owner, company=company, campaign=campaign, recipient_id=rid, usage_date=day)
              for rid in unreserved],

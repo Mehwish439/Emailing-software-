@@ -14,6 +14,7 @@ platform total. A company that is idle (no pending recipients) reserves nothing.
 import math
 from datetime import timedelta
 
+from django.db.models import Q
 from django.utils import timezone
 
 from campaigns.models import Campaign, CampaignRecipient
@@ -44,10 +45,29 @@ def _key_of(msg_owner_company_id, owner_id):
     return msg_owner_company_id if msg_owner_company_id is not None else -owner_id
 
 
+def _sendpulse_may_submit() -> bool:
+    """
+    Optional SENDPULSE_RATE_LIMIT (messages/minute, from the SendPulse plan). Counts ONLY SendPulse
+    messages, so it is a separate budget from Brevo/SMTP and never throttles them. 0 = no cap.
+    """
+    from django.conf import settings as dj_settings
+
+    cap = dj_settings.SENDPULSE_RATE_LIMIT
+    if not cap:
+        return True
+    since = timezone.now() - timedelta(seconds=60)
+    # Count by acceptance time too: the dispatcher clears submitting_since once a message completes.
+    used = OutboundMessage.objects.filter(provider="sendpulse").filter(
+        Q(submitting_since__gte=since) | Q(accepted_at__gte=since)).count()
+    return used < cap
+
+
 def may_submit(campaign) -> bool:
     """True if one more message from `campaign`'s tenant may be submitted right now."""
     platform = PlatformSettings.load()
     if platform.queue_paused:
+        return False
+    if campaign.provider == "sendpulse" and not _sendpulse_may_submit():
         return False
     rate = platform.rate_per_minute
     if not rate and campaign.provider == "smtp":

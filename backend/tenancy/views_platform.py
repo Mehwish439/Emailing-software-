@@ -17,7 +17,7 @@ from providers.registry import PROVIDERS, get_provider
 
 from .models import AuditLog, Company, JobHeartbeat, Plan, PlatformSettings, QuotaLedger
 from .permissions import IsPlatformAdmin
-from .quota import usage
+from .quota import usage, usage_by_provider
 from .serializers import (
     AuditSerializer, CompanySerializer, PlanSerializer, PlatformSettingsSerializer,
 )
@@ -289,6 +289,7 @@ class QuotaOverview(PlatformBase):
         return Response({
             "platform": {"daily_budget": budget, "monthly_budget": p.monthly_budget, "daily_used": d_used,
                          "monthly_used": m_used, "rate_per_minute": p.rate_per_minute},
+            "by_provider": usage_by_provider(),
             "allocated_daily": allocated_daily,
             "unallocated_daily": None if budget is None else budget - allocated_daily,
             "overcommitted": budget is not None and allocated_daily > budget,
@@ -462,7 +463,7 @@ class Health(PlatformBase):
                                    "configured": bool(s.SMTP_HOST)}
                 continue
             prov = get_provider(name)
-            result = prov.health(live=True) if name == "brevo" else prov.health()
+            result = prov.health(live=True) if name in ("brevo", "sendpulse") else prov.health()
             providers[name] = {**result, "active": p.active_provider == name}
         out["providers"] = providers
         out["broker"] = _broker_status()

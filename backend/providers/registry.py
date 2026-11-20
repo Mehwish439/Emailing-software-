@@ -3,9 +3,12 @@ from django.conf import settings
 
 from .base import ProviderConfigError
 from .brevo_provider import BrevoProvider
+from .sendpulse_provider import SendPulseProvider
 from .smtp_provider import SmtpProvider
 
-PROVIDERS = {"brevo": BrevoProvider, "smtp": SmtpProvider}
+PROVIDERS = {"brevo": BrevoProvider, "smtp": SmtpProvider, "sendpulse": SendPulseProvider}
+# Human-readable names, shared by the campaign API (and mirrored in the frontend's utils/providers.js).
+PROVIDER_LABELS = {"brevo": "Brevo", "smtp": "Our own SMTP server", "sendpulse": "SendPulse"}
 
 
 def get_provider(name):
@@ -32,6 +35,12 @@ def available_providers(user):
             options = approved
             if company.preferred_provider in approved:
                 default = company.preferred_provider
+    elif platform and platform.allow_company_provider_choice and not company:
+        # A standalone account (no company) has no approved-provider list to consult. When the platform
+        # administrator has switched provider choice ON, every registered provider is offered (the picker
+        # still greys out any that are not configured). With the switch OFF -- the default -- nothing here
+        # changes: the single active provider is used, exactly as before.
+        options = list(PROVIDERS)
     return {"options": options, "default": default, "choice_allowed": len(options) > 1}
 
 

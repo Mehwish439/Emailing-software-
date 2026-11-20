@@ -18,7 +18,7 @@ class _ProviderChoiceMixin:
         from providers.base import ProviderConfigError
         from providers.registry import available_providers, get_provider
 
-        from providers.registry import PROVIDERS
+        from providers.registry import PROVIDER_LABELS, PROVIDERS
 
         info = available_providers(request.user)
 
@@ -29,7 +29,7 @@ class _ProviderChoiceMixin:
             except ProviderConfigError:
                 return False
 
-        labels = {"brevo": "Brevo", "smtp": "Our own SMTP server"}
+        labels = PROVIDER_LABELS
         options = []
         for name in PROVIDERS:                       # always list every provider so the choice is visible
             allowed = name in info["options"]
@@ -186,6 +186,36 @@ class CampaignViewSet(_ProviderChoiceMixin, viewsets.ModelViewSet):
     def statistics(self, request, pk=None):
         campaign = self.get_object()
         return Response(compute_campaign_analytics(campaign))
+
+    @action(detail=True, methods=["get"], url_path="provider-log")
+    def provider_log(self, request, pk=None):
+        """
+        GET /api/campaigns/{id}/provider-log/ -- what the sending provider did for THIS campaign: message
+        states, recent send errors, and recent inbound events (all from our own records, no provider call).
+        """
+        from django.db.models import Count
+
+        from providers.models import OutboundMessage, ProviderEventLog
+
+        campaign = self.get_object()
+        msgs = OutboundMessage.objects.filter(campaign=campaign)
+        states = {row["state"]: row["n"] for row in msgs.values("state").annotate(n=Count("id"))}
+        errors = msgs.exclude(last_error="").select_related("recipient__contact").order_by("-updated_at")[:20]
+        events = ProviderEventLog.objects.filter(campaign=campaign).order_by("-received_at")[:20]
+        return Response({
+            "provider": campaign.provider or campaign.requested_provider or "",
+            "frozen": bool(campaign.provider),
+            "states": states,
+            "total": sum(states.values()),
+            "recent_errors": [{
+                "recipient": m.recipient.contact.email, "state": m.state, "attempts": m.attempts,
+                "code": m.last_error_code, "error": m.last_error, "updated_at": m.updated_at,
+            } for m in errors],
+            "recent_events": [{
+                "event": e.event_type, "recipient": e.recipient_email, "outcome": e.outcome,
+                "source": e.source, "received_at": e.received_at,
+            } for e in events],
+        })
 
     @action(detail=True, methods=["get"])
     @action(detail=True, methods=["get"])

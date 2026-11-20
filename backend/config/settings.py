@@ -405,6 +405,43 @@ SMTP_BOUNCE_WEBHOOK_SECRET = os.getenv("SMTP_BOUNCE_WEBHOOK_SECRET", "")
 
 
 # ---------------------------------------------------------------------------
+# SendPulse (SMTP / transactional API)  (NEW -- runs alongside Brevo; nothing above changes)
+# ---------------------------------------------------------------------------
+# Credentials can come from EITHER the Providers & limits page (stored encrypted in the database,
+# which needs PROVIDER_CREDENTIALS_KEY) OR these environment variables. A value saved in the
+# database wins; the environment is the fallback. Secrets are server-side only: never put any of
+# these into a Vite/frontend variable.
+SENDPULSE_API_BASE_URL = os.getenv("SENDPULSE_API_BASE_URL", "https://api.sendpulse.com").rstrip("/")
+SENDPULSE_CLIENT_ID = os.getenv("SENDPULSE_CLIENT_ID", "")
+SENDPULSE_CLIENT_SECRET = os.getenv("SENDPULSE_CLIENT_SECRET", "")
+SENDPULSE_SENDER_NAME = os.getenv("SENDPULSE_SENDER_NAME", "")
+SENDPULSE_SENDER_EMAIL = os.getenv("SENDPULSE_SENDER_EMAIL", "")
+# Secret key SendPulse generates for the webhook (Account settings > Webhooks > Edit). Used to verify
+# the X-Signature header (HMAC-SHA256 of the raw body). With none configured the webhook refuses all calls.
+SENDPULSE_WEBHOOK_SECRET = os.getenv("SENDPULSE_WEBHOOK_SECRET", "")
+# Render's gunicorn kills a request after 30s and a batch is several sends, so keep this short.
+SENDPULSE_HTTP_TIMEOUT = int(os.getenv("SENDPULSE_HTTP_TIMEOUT", "10"))
+# Immediate retries only ever happen for failures that PROVE nothing was accepted (see
+# providers/sendpulse_provider.py); anything uncertain goes to "needs review" instead.
+SENDPULSE_MAX_SEND_ATTEMPTS = int(os.getenv("SENDPULSE_MAX_SEND_ATTEMPTS", "3"))
+SENDPULSE_RETRY_BACKOFF_SECONDS = int(os.getenv("SENDPULSE_RETRY_BACKOFF_SECONDS", "30"))
+# SendPulse rejects bursts above 10 requests/second (error 2020202020); this keeps one process under it.
+SENDPULSE_MIN_SEND_INTERVAL_MS = int(os.getenv("SENDPULSE_MIN_SEND_INTERVAL_MS", "120"))
+# Optional software guards, from YOUR SendPulse plan (0 = none). Messages/minute for submission pacing,
+# and a per-provider daily / monthly message allowance enforced when a campaign reserves its quota.
+SENDPULSE_RATE_LIMIT = int(os.getenv("SENDPULSE_RATE_LIMIT", "0"))
+SENDPULSE_DAILY_LIMIT = int(os.getenv("SENDPULSE_DAILY_LIMIT", "0"))
+SENDPULSE_MONTHLY_LIMIT = int(os.getenv("SENDPULSE_MONTHLY_LIMIT", "0"))
+# Fernet key(s) used to encrypt provider credentials saved through the UI. Generate one with:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Comma-separate several keys to rotate (the first encrypts; all decrypt). Without it, credentials
+# cannot be saved in the UI (the SENDPULSE_* environment variables still work).
+PROVIDER_CREDENTIALS_KEY = os.getenv("PROVIDER_CREDENTIALS_KEY", "")
+# Retention for the webhook/event log (days) used by `manage.py prune_provider_logs`.
+PROVIDER_LOG_RETENTION_DAYS = int(os.getenv("PROVIDER_LOG_RETENTION_DAYS", "90"))
+
+
+# ---------------------------------------------------------------------------
 # Scheduling / Cron
 # ---------------------------------------------------------------------------
 # Shared secret guarding POST /api/scheduling/process-due/ — the HTTP

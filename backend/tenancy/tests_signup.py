@@ -142,13 +142,13 @@ class ProviderChoiceTests(Fixture, APITestCase):
 
     def test_options_endpoint_follows_policy_and_exposes_no_secrets(self):
         r = self.client.get("/api/campaigns/providers/")
-        self.assertEqual([o["name"] for o in r.data["options"]], ["brevo", "smtp"])        # both are always listed
-        self.assertEqual({o["name"]: o["allowed"] for o in r.data["options"]}, {"brevo": True, "smtp": False})   # choice off
+        self.assertEqual([o["name"] for o in r.data["options"]], ["brevo", "smtp", "sendpulse"])   # all are always listed
+        self.assertEqual({o["name"]: o["allowed"] for o in r.data["options"]}, {"brevo": True, "smtp": False, "sendpulse": False})   # choice off
         self.assertIn("administrator", [o for o in r.data["options"] if o["name"] == "smtp"][0]["reason"])
         self.assertFalse(r.data["choice_allowed"])
         self._enable_choice()
         r = self.client.get("/api/campaigns/providers/")
-        self.assertEqual({o["name"]: o["allowed"] for o in r.data["options"]}, {"brevo": True, "smtp": True})
+        self.assertEqual({o["name"]: o["allowed"] for o in r.data["options"]}, {"brevo": True, "smtp": True, "sendpulse": False})   # sendpulse not in this company's approved list
         self.assertTrue(r.data["choice_allowed"])
         smtp = [o for o in r.data["options"] if o["name"] == "smtp"][0]
         self.assertFalse(smtp["usable"])                                   # SMTP env is not configured in tests

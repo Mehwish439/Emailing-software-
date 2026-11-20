@@ -50,6 +50,9 @@ def retry_policy(provider_name):
     """(max_attempts, backoff_base_seconds). backoff 0 = retry immediately (legacy Brevo behaviour)."""
     if provider_name == "smtp":
         return max(1, settings.SMTP_MAX_RETRIES), 60
+    if provider_name == "sendpulse":
+        # Backoff > 0 so a rate-limited (429) or briefly unavailable SendPulse is not hammered inline.
+        return max(1, settings.SENDPULSE_MAX_SEND_ATTEMPTS), max(1, settings.SENDPULSE_RETRY_BACKOFF_SECONDS)
     return max(1, getattr(settings, "BREVO_MAX_SEND_ATTEMPTS", 2)), 0
 
 
