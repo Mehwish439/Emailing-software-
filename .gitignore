@@ -24,3 +24,5 @@ deployment/self-hosted-smtp/*.key
 deployment/self-hosted-smtp/*.pem
 deployment/self-hosted-smtp/__pycache__/
 *.private
+venv/
+frontend/venv/
