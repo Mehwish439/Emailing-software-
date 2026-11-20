@@ -19,3 +19,4 @@ reportlab==4.2.5
 # --- Added for the multi-tenant / provider upgrade (optional Celery + Redis; app runs without them) ---
 celery>=5.4,<6.0
 redis>=5.0,<6.0
+cryptography==50.0.2
