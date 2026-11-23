@@ -59,27 +59,36 @@ def provider_limits(provider):
     return None, None
 
 
-def provider_usage(provider, day=None):
-    """(daily_used, monthly_used) for the campaigns frozen to `provider`. Pre-upgrade campaigns have
-    provider "" and were sent by the platform default, so they count toward that provider."""
+def provider_usage(provider, day=None, company=None, user=None):
+    """(daily_used, monthly_used) for the campaigns frozen to `provider`, optionally narrowed to one company or
+    one user. Pre-upgrade campaigns have provider "" and were sent by the platform default, so they count
+    toward that provider."""
     from django.conf import settings
 
     day = day or timezone.localdate()
-    qs = QuotaLedger.objects.filter(campaign__provider=provider)
-    if provider == settings.EMAIL_PROVIDER:
-        qs = QuotaLedger.objects.filter(campaign__provider__in=[provider, ""])
+    names = [provider, ""] if provider == settings.EMAIL_PROVIDER else [provider]
+    qs = QuotaLedger.objects.filter(campaign__provider__in=names)
+    if company is not None:
+        qs = qs.filter(company=company)
+    if user is not None:
+        qs = qs.filter(user=user)
     return (_sum(qs.filter(usage_date=day)),
             _sum(qs.filter(usage_date__year=day.year, usage_date__month=day.month)))
 
 
-def usage_by_provider(day=None):
-    """{provider: {daily_used, monthly_used, daily_limit, monthly_limit}} for every registered provider."""
+def usage_by_provider(day=None, company=None, user=None):
+    """
+    {provider: {daily_used, monthly_used, daily_limit, monthly_limit}} for every registered provider.
+    The configured provider allowance is a PLATFORM-wide guard, so it is only included when the figures are
+    platform-wide (no company/user narrowing); narrowed views report usage only.
+    """
     from providers.registry import PROVIDERS
 
+    platform_wide = company is None and user is None
     out = {}
     for name in PROVIDERS:
-        d, m = provider_usage(name, day)
-        dl, ml = provider_limits(name)
+        d, m = provider_usage(name, day, company=company, user=user)
+        dl, ml = provider_limits(name) if platform_wide else (None, None)
         out[name] = {"daily_used": d, "monthly_used": m, "daily_limit": dl, "monthly_limit": ml}
     return out
 
@@ -98,6 +107,7 @@ def quota_snapshot(user):
         cd, cm = usage(company=c)
         snap["company"] = {"daily_limit": c.daily_limit, "monthly_limit": c.monthly_limit,
                            "daily_used": cd, "monthly_used": cm}
+    snap["by_provider"] = usage_by_provider(user=user)
     p = PlatformSettings.load()
     pd, pm = usage(platform=True)
     snap["platform"] = {"daily_limit": p.daily_budget, "monthly_limit": p.monthly_budget,

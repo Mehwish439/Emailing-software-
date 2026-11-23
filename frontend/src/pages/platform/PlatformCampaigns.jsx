@@ -6,6 +6,7 @@ import useApi from "../../hooks/useApi";
 import { platform } from "../../services/adminService";
 import { formatApiError } from "../../utils/formatError";
 import { Async, Badge, DataTable, PageFooter, PageHeader, fmt } from "../../components/admin/ui";
+import { providerLabel } from "../../utils/providers";
 
 const STATUSES = ["", "draft", "scheduled", "processing", "paused", "sent", "failed", "cancelled"];
 
@@ -22,7 +23,7 @@ export default function PlatformCampaigns() {
       <select aria-label="Status" className="input max-w-xs" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>{STATUSES.map((s) => <option key={s} value={s}>{s || "All statuses"}</option>)}</select>
       <div className="card"><Async state={state}>{(d) => (<><DataTable rows={d.results} empty="No campaigns match." columns={[
         { key: "name", header: "Campaign", render: (c) => <div><p className="font-medium">{c.name}</p><p className="text-xs text-slate-500">{c.owner}</p></div> }, { key: "company", header: "Company", render: (c) => c.company || "—" },
-        { key: "status", header: "Status", render: (c) => <Badge value={c.status} /> }, { key: "provider", header: "Provider", render: (c) => c.provider || "—" }, { key: "recipients", header: "Recipients", render: (c) => fmt(c.recipients) },
+        { key: "status", header: "Status", render: (c) => <Badge value={c.status} /> }, { key: "provider", header: "Provider", render: (c) => (c.provider ? providerLabel(c.provider) : "—") }, { key: "recipients", header: "Recipients", render: (c) => fmt(c.recipients) },
         { key: "a", header: "", render: (c) => c.status === "processing" ? <button className="btn-secondary px-2 py-1" onClick={() => setConfirm({ id: c.id, action: "pause", name: c.name })}>Pause</button> : c.status === "paused" ? <button className="btn-secondary px-2 py-1" onClick={() => setConfirm({ id: c.id, action: "resume", name: c.name })}>Resume</button> : null }]} /><PageFooter data={d} onPage={setPage} /></>)}</Async></div>
       <ConfirmDialog open={!!confirm} onClose={() => setConfirm(null)} onConfirm={run} danger={false} title={`${confirm?.action === "pause" ? "Pause" : "Resume"} campaign`} message={`${confirm?.action === "pause" ? "Pause" : "Resume"} “${confirm?.name}”?`} confirmLabel="Confirm" />
     </div>

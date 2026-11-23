@@ -43,6 +43,7 @@ class Overview(PlatformBase):
         backlog = states.get("queued", 0) + states.get("deferred", 0)
         rate = p.rate_per_minute
         return Response({
+            "by_provider": usage_by_provider(),
             "kpis": {
                 "companies": Company.objects.count(),
                 "active_companies": Company.objects.exclude(status="suspended").count(),
@@ -93,7 +94,11 @@ class CompanyDetail(PlatformBase):
         if not c:
             return Response({"detail": "Not found."}, status=404)
         r, e = scoped(company=c, since=timezone.now() - timedelta(days=30))
+        from providers.registry import company_provider_options
+
         return Response({**CompanySerializer(c).data, "metrics_30d": delivery_metrics(r, e),
+                         "by_provider": usage_by_provider(company=c),
+                         "effective_providers": company_provider_options(c),
                          "members": MemberSerializer(c.members.all(), many=True).data})
 
     def patch(self, request, pk):

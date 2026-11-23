@@ -5,6 +5,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import DateTimeTimezonePicker from "../components/DateTimeTimezonePicker";
 import Modal from "../components/Modal";
 import Spinner from "../components/Spinner";
+import ProviderPanel from "../components/ProviderPanel";
 import StatCard from "../components/StatCard";
 import StatusBadge from "../components/StatusBadge";
 import { useToast } from "../context/ToastContext";
@@ -13,6 +14,7 @@ import {
   downloadCampaignReportPdf,
   getCampaign,
   getCampaignAbResults,
+  getCampaignProviderLog,
   getCampaignRecipients,
   sendCampaignNow,
   sendTestEmail,
@@ -20,6 +22,7 @@ import {
 import { cancelSchedule, createSchedule, listScheduledCampaigns } from "../services/schedulingService";
 import { localDateTimeInZoneToUTC } from "../utils/timezone";
 import { formatApiError } from "../utils/formatError";
+import { providerLabel } from "../utils/providers";
 
 function defaultDate() {
   const d = new Date();
@@ -34,6 +37,7 @@ export default function CampaignDetailPage() {
   const [campaign, setCampaign] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [abResults, setAbResults] = useState(null);
+  const [providerLog, setProviderLog] = useState(null);
   const [recipients, setRecipients] = useState([]);
   const [recipientsPage, setRecipientsPage] = useState(1);
   const [recipientsHasMore, setRecipientsHasMore] = useState(false);
@@ -88,6 +92,7 @@ export default function CampaignDetailPage() {
 
       if (campaignData.status !== "draft") {
         getCampaignAnalytics(id).then(setAnalytics).catch(() => {});
+        getCampaignProviderLog(id).then(setProviderLog).catch(() => {});
         if (campaignData.campaign_type === "ab_test") {
           getCampaignAbResults(id).then(setAbResults).catch(() => {});
         }
@@ -223,15 +228,15 @@ export default function CampaignDetailPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-[22px] font-semibold leading-8 text-slate-900">{campaign.name}</h1>
+            <h1 className="text-2xl font-semibold text-slate-900">{campaign.name}</h1>
             <StatusBadge status={campaign.status} />
           </div>
           <p className="text-sm text-slate-500">{campaign.subject}</p>
           <p className="text-xs text-slate-500 mt-1">
             {campaign.provider
-              ? <>Sent via <b>{campaign.provider === "smtp" ? "our SMTP server" : "Brevo"}</b></>
+              ? <>Sent via <b>{providerLabel(campaign.provider)}</b></>
               : campaign.requested_provider
-                ? <>Will send via <b>{campaign.requested_provider === "smtp" ? "our SMTP server" : "Brevo"}</b></>
+                ? <>Will send via <b>{providerLabel(campaign.requested_provider)}</b></>
                 : <>Will send via the default provider (change it with Edit)</>}
           </p>
         </div>
@@ -274,6 +279,8 @@ export default function CampaignDetailPage() {
           <p className="text-sm text-red-700">{campaign.failure_reason}</p>
         </div>
       )}
+
+      <ProviderPanel log={providerLog} />
 
       {analytics && (
         <>
@@ -329,12 +336,12 @@ export default function CampaignDetailPage() {
             <StatCard label="Delivery Rate" value={`${analytics.delivery_rate}%`} />
           </div>
           {analytics.sent > 0 && analytics.delivered === 0 && (
-            <div className="card p-4 !bg-sky-50 !border-sky-200">
+            <div className="card p-4 bg-blue-50 border-blue-200">
               <p className="text-sm text-blue-800">
                 <span className="font-semibold">{analytics.sent}</span> email
                 {analytics.sent === 1 ? " was" : "s were"} sent, but Delivered/Opened/Clicked are still showing 0.
-                Those numbers come from Brevo's webhook, not from sending itself — if your backend isn't running
-                on a publicly reachable HTTPS URL that Brevo can call (e.g. it's still on <code>localhost</code>),
+                Those numbers come from your email provider's webhook, not from sending itself — if your backend isn't running
+                on a publicly reachable HTTPS URL that {providerLabel(campaign.provider)} can call (e.g. it's still on <code>localhost</code>),
                 the webhook can't reach it and these will stay at 0 even though the emails actually sent fine. See
                 the README's webhook setup section (a tool like <code>ngrok http 8000</code> works for local
                 testing).
@@ -443,12 +450,12 @@ export default function CampaignDetailPage() {
               : "No recipients yet."}
           </p>
         ) : (
-          <table className="min-w-full divide-y divide-slate-100">
-            <thead className="bg-slate-50/70">
+          <table className="min-w-full divide-y divide-slate-200">
+            <thead className="bg-slate-50">
               <tr>
-                <th className="th">Contact</th>
-                <th className="th">Status</th>
-                <th className="th">Sent At</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Contact</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Sent At</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">

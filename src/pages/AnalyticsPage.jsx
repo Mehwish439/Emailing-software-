@@ -1,11 +1,8 @@
 import { useEffect, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import ChartCard, { CHART_COLORS, chartTooltipStyle } from "../components/ChartCard";
-import Icon from "../components/Icon";
-import PageHeader from "../components/PageHeader";
 import RecipientsPanel from "../components/RecipientsPanel";
-import { PageSkeleton, Skeleton } from "../components/Skeleton";
+import Spinner from "../components/Spinner";
 import StatCard from "../components/StatCard";
 import { useToast } from "../context/ToastContext";
 import { downloadAllCampaignsReportPdf, getAllRecipients, getCampaignAnalytics, getDashboardSummary } from "../services/analyticsService";
@@ -21,7 +18,6 @@ export default function AnalyticsPage() {
   const [campaignAnalytics, setCampaignAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
-  const [comparison, setComparison] = useState(null); // per-campaign rates for the most recent sent campaigns
 
   // Clicking a stat card below filters the recipients panel to just that
   // status. When a single campaign is selected (selectedCampaignId), this
@@ -46,11 +42,6 @@ export default function AnalyticsPage() {
       ]);
       setSummary(summaryData);
       setCampaigns(campaignsData.results || []);
-      // Campaign comparison: reuse the existing per-campaign analytics endpoint for the latest few sent campaigns.
-      const latest = (campaignsData.results || []).slice(0, 6);
-      Promise.all(latest.map((c) => getCampaignAnalytics(c.id).then((a) => ({ name: c.name.length > 16 ? `${c.name.slice(0, 15)}…` : c.name, full: c.name, open: a.open_rate, click: a.click_rate, bounce: a.bounce_rate })).catch(() => null)))
-        .then((rows) => setComparison(rows.filter(Boolean).reverse()))
-        .catch(() => setComparison([]));
       // Starts on "All campaigns" (empty selection) rather than
       // auto-picking the first one, since the top stat cards below now
       // switch between the overall summary and a single campaign's numbers
@@ -131,7 +122,13 @@ export default function AnalyticsPage() {
     }
   };
 
-  if (loading) return <PageSkeleton />;
+  if (loading) {
+    return (
+      <div className="flex justify-center py-24">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
 
   const chartData = campaignAnalytics
     ? [
@@ -144,7 +141,9 @@ export default function AnalyticsPage() {
       ]
     : [];
 
-  // The top stat cards show the SELECTED campaign's own numbers once one is chosen, otherwise the account-wide totals.
+  // The top stat cards show the SELECTED campaign's own numbers once one is
+  // chosen below, instead of always showing the account-wide totals — that
+  // way picking a campaign actually changes what's displayed up top too.
   const topStats = campaignAnalytics
     ? {
         emails_sent: campaignAnalytics.sent,
@@ -158,117 +157,130 @@ export default function AnalyticsPage() {
     : summary;
 
   const STAT_CARDS = [
-    { label: "Emails Sent", value: topStats?.emails_sent ?? 0, icon: "mail", tone: "sky" },
-    { label: "Delivered", value: topStats?.delivered ?? 0, icon: "checkCircle", tone: "green" },
-    { label: "Opened", value: topStats?.opened ?? 0, icon: "mailOpen", tone: "brand" },
-    { label: "Clicked", value: topStats?.clicked ?? 0, icon: "pointer", tone: "violet" },
-    { label: "Bounced", value: topStats?.bounced ?? 0, icon: "ban", tone: "red" },
-    { label: "Unsubscribed", value: topStats?.unsubscribed ?? 0, icon: "user", tone: "amber" },
-    { label: "Spam Complaints", value: topStats?.spam_complaints ?? 0, icon: "alert", tone: "slate" },
+    { label: "Emails Sent", value: topStats?.emails_sent ?? 0 },
+    { label: "Delivered", value: topStats?.delivered ?? 0 },
+    { label: "Opened", value: topStats?.opened ?? 0 },
+    { label: "Clicked", value: topStats?.clicked ?? 0 },
+    { label: "Bounced", value: topStats?.bounced ?? 0 },
+    { label: "Unsubscribed", value: topStats?.unsubscribed ?? 0 },
+    { label: "Spam Complaints", value: topStats?.spam_complaints ?? 0 },
   ];
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Analytics"
-        subtitle={selectedCampaignId ? "Showing numbers for the selected campaign." : "Overall performance across all campaigns."}
-        actions={
-          <>
-            {campaigns.length > 0 && (
-              <select className="input w-56" aria-label="Choose a campaign" value={selectedCampaignId} onChange={(e) => setSelectedCampaignId(e.target.value)}>
-                <option value="">All campaigns</option>
-                {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            )}
-            <button className="btn-secondary" onClick={handleDownloadPdf} disabled={downloadingPdf}>
-              <Icon name="download" className="h-4 w-4" /> {downloadingPdf ? "Generating…" : "Download PDF report"}
-            </button>
-          </>
-        }
-      />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Analytics</h1>
+          <p className="text-sm text-slate-500">
+            {selectedCampaignId
+              ? `Showing numbers for the selected campaign below.`
+              : "Overall performance across all campaigns."}
+          </p>
+        </div>
+        <button className="btn-secondary text-sm" onClick={handleDownloadPdf} disabled={downloadingPdf}>
+          {downloadingPdf ? "Generating…" : "Download PDF Report (all campaigns)"}
+        </button>
+      </div>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        {STAT_CARDS.map((st) => {
-          const filterValue = RECIPIENT_STATUS_FILTERS[st.label];
-          return <StatCard key={st.label} label={st.label} value={st.value} icon={st.icon} tone={st.tone} onClick={() => handleStatCardClick(filterValue)} active={statusFilter === filterValue} />;
+      <p className="text-xs text-slate-400">
+        Click a stat to see matching recipients{selectedCampaignId ? "" : " across all campaigns"} — click again to
+        clear.
+      </p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+        {STAT_CARDS.map((s) => {
+          const filterValue = RECIPIENT_STATUS_FILTERS[s.label];
+          return (
+            <StatCard
+              key={s.label}
+              label={s.label}
+              value={s.value}
+              onClick={() => handleStatCardClick(filterValue)}
+              active={statusFilter === filterValue}
+            />
+          );
         })}
       </div>
-      <p className="-mt-3 text-xs text-slate-500">Select a metric to see matching recipients{selectedCampaignId ? "" : " across all campaigns"}. Select it again to clear.</p>
 
       {statusFilter && (
-        <RecipientsPanel recipients={recipients} statusFilter={statusFilter} onClear={() => applyStatusFilter(null)} hasMore={recipientsHasMore}
-          loadingMore={loadingMoreRecipients} onLoadMore={loadMoreRecipients} loading={loadingRecipients} totalCount={recipientsTotal} showCampaignColumn={!selectedCampaignId} />
+        <RecipientsPanel
+          recipients={recipients}
+          statusFilter={statusFilter}
+          onClear={() => applyStatusFilter(null)}
+          hasMore={recipientsHasMore}
+          loadingMore={loadingMoreRecipients}
+          onLoadMore={loadMoreRecipients}
+          loading={loadingRecipients}
+          totalCount={recipientsTotal}
+          showCampaignColumn={!selectedCampaignId}
+        />
       )}
 
       {summary?.emails_sent > 0 && summary?.delivered === 0 && (
-        <div className="flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
-          <Icon name="info" className="mt-0.5 h-4 w-4" />
-          <p>
-            <span className="font-semibold">{summary.emails_sent}</span> email{summary.emails_sent === 1 ? " has" : "s have"} been sent, but Delivered, Opened and Clicked are all still 0. Those numbers only arrive through Brevo’s webhook, not from sending itself. If your backend isn’t reachable at a public HTTPS URL (for example it runs on <code>localhost</code>), Brevo can’t call it back and these stay at 0 even though the emails went out. For local testing, expose the backend with a tool like <code>ngrok http 8000</code> and point the webhook at that URL — see the README’s Brevo webhook setup section.
+        <div className="card p-4 bg-blue-50 border-blue-200">
+          <p className="text-sm text-blue-800">
+            <span className="font-semibold">{summary.emails_sent}</span> email
+            {summary.emails_sent === 1 ? " has" : "s have"} been sent, but Delivered/Opened/Clicked are all still
+            0. Those numbers only come in via your email provider's webhook (Brevo or SendPulse), not from sending itself — if your backend isn't
+            reachable at a public HTTPS URL (e.g. it's running on <code>localhost</code>), the provider has no way to
+            call it back and these will stay at 0 even though the emails actually went out fine. For local
+            testing, expose your backend with a tool like <code>ngrok http 8000</code> and point the webhook at
+            that URL — see the Brevo webhook section of the README or docs/SENDPULSE_INTEGRATION.md for SendPulse.
           </p>
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <div className="card">
-          <div className="card-header">
-            <div>
-              <h2 className="card-title">Campaign performance</h2>
-              <p className="mt-0.5 text-xs text-slate-500">{selectedCampaignId ? "Counts for the selected campaign" : "Select a campaign above for its detailed chart and rates"}</p>
-            </div>
-          </div>
-          <div className="p-5">
-            {campaigns.length === 0 ? (
-              <p className="py-14 text-center text-sm text-slate-500">No sent campaigns yet.</p>
-            ) : !selectedCampaignId ? (
-              <p className="py-14 text-center text-sm text-slate-500">Choose a campaign from the menu at the top of the page.</p>
-            ) : campaignAnalytics ? (
-              <>
-                <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} margin={{ left: -12 }}>
-                      <CartesianGrid vertical={false} stroke={CHART_COLORS.grid} strokeDasharray="3 3" />
-                      <XAxis dataKey="name" tick={{ fontSize: 12, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 12, fill: "#64748b" }} allowDecimals={false} axisLine={false} tickLine={false} />
-                      <Tooltip contentStyle={chartTooltipStyle} cursor={{ fill: "#f1f5f9" }} />
-                      <Bar dataKey="value" fill={CHART_COLORS.primary} radius={[6, 6, 0, 0]} maxBarSize={48} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  <RateStat label="Delivery rate" value={campaignAnalytics.delivery_rate} />
-                  <RateStat label="Open rate" value={campaignAnalytics.open_rate} />
-                  <RateStat label="Click rate" value={campaignAnalytics.click_rate} />
-                  <RateStat label="Bounce rate" value={campaignAnalytics.bounce_rate} />
-                  <RateStat label="Unsubscribe rate" value={campaignAnalytics.unsubscribe_rate} />
-                  <RateStat label="Spam rate" value={campaignAnalytics.spam_rate} />
-                </div>
-              </>
-            ) : (
-              <div className="space-y-3 py-6"><Skeleton className="h-48 w-full" /><Skeleton className="h-4 w-1/2" /></div>
-            )}
-          </div>
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-slate-900">Campaign performance</h2>
+          {campaigns.length > 0 && (
+            <select
+              className="input max-w-xs"
+              value={selectedCampaignId}
+              onChange={(e) => setSelectedCampaignId(e.target.value)}
+            >
+              <option value="">All campaigns (totals above)</option>
+              {campaigns.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
-        <ChartCard title="Campaign comparison" subtitle="Open, click and bounce rate (%) for your latest sent campaigns"
-          empty={campaigns.length === 0 ? "No sent campaigns yet." : comparison && comparison.length === 0 ? "Comparison data isn’t available right now." : null} height="h-[26rem]">
-          {comparison === null ? (
-            <div className="space-y-3"><Skeleton className="h-64 w-full" /><Skeleton className="h-4 w-1/3" /></div>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={comparison} margin={{ left: -12 }}>
-                <CartesianGrid vertical={false} stroke={CHART_COLORS.grid} strokeDasharray="3 3" />
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} interval={0} />
-                <YAxis tick={{ fontSize: 12, fill: "#64748b" }} unit="%" axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={chartTooltipStyle} cursor={{ fill: "#f1f5f9" }} labelFormatter={(_, p) => p?.[0]?.payload?.full} formatter={(v) => `${v}%`} />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="open" name="Open rate" fill={CHART_COLORS.primary} radius={[4, 4, 0, 0]} maxBarSize={22} />
-                <Bar dataKey="click" name="Click rate" fill={CHART_COLORS.violet} radius={[4, 4, 0, 0]} maxBarSize={22} />
-                <Bar dataKey="bounce" name="Bounce rate" fill={CHART_COLORS.red} radius={[4, 4, 0, 0]} maxBarSize={22} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
+        {campaigns.length === 0 ? (
+          <p className="text-sm text-slate-500 text-center py-12">No sent campaigns yet.</p>
+        ) : !selectedCampaignId ? (
+          <p className="text-sm text-slate-500 text-center py-12">
+            Select a campaign above to see its detailed chart and rates.
+          </p>
+        ) : campaignAnalytics ? (
+          <>
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="value" fill="#3d63f7" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-4 text-sm">
+              <RateStat label="Delivery Rate" value={campaignAnalytics.delivery_rate} />
+              <RateStat label="Open Rate" value={campaignAnalytics.open_rate} />
+              <RateStat label="Click Rate" value={campaignAnalytics.click_rate} />
+              <RateStat label="Bounce Rate" value={campaignAnalytics.bounce_rate} />
+              <RateStat label="Unsubscribe Rate" value={campaignAnalytics.unsubscribe_rate} />
+              <RateStat label="Spam Rate" value={campaignAnalytics.spam_rate} />
+            </div>
+          </>
+        ) : (
+          <div className="flex justify-center py-12">
+            <Spinner />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -276,9 +288,9 @@ export default function AnalyticsPage() {
 
 function RateStat({ label, value }) {
   return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
-      <p className="text-lg font-semibold tabular-nums text-slate-900">{value}%</p>
-      <p className="text-xs text-slate-500">{label}</p>
+    <div className="rounded-lg bg-slate-50 px-4 py-3">
+      <p className="text-lg font-semibold text-slate-900">{value}%</p>
+      <p className="text-slate-500">{label}</p>
     </div>
   );
 }

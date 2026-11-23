@@ -83,3 +83,8 @@ export async function downloadCampaignReportPdf(id, campaignName) {
   const response = await api.get(`/analytics/campaigns/${id}/report.pdf`, { responseType: "blob" });
   downloadBlob(response.data, `${slugify(campaignName)}-report.pdf`);
 }
+// What the sending provider did for one campaign (message states, recent send errors, inbound events).
+export async function getCampaignProviderLog(id) {
+  const { data } = await api.get(`/campaigns/${id}/provider-log/`);
+  return data;
+}

@@ -18,7 +18,7 @@ from contacts.models import Contact, Suppression
 
 from .models import AuditLog, QuotaLedger
 from .permissions import IsCompanyAdmin
-from .quota import usage
+from .quota import usage, usage_by_provider
 from .serializers import AuditSerializer, CompanySerializer, MemberSerializer
 from .invites import link_payload
 from .services import audit, day_bounds, delivery_metrics, invite_url, paginate, scoped
@@ -228,7 +228,10 @@ class Quotas(CompanyBase):
         assigned = sum(r["daily_quota"] or 0 for r in rows)
         limit = c.daily_limit
         d_used, m_used = usage(company=c)
+        from providers.registry import company_provider_options
+
         return Response({
+            "by_provider": usage_by_provider(company=c), "effective_providers": company_provider_options(c),
             "daily_limit": limit, "monthly_limit": c.monthly_limit, "daily_used": d_used, "monthly_used": m_used,
             "assigned_daily": assigned,
             "unallocated_daily": None if limit is None else limit - assigned,

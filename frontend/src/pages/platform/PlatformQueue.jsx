@@ -6,6 +6,7 @@ import useApi, { useDebounced } from "../../hooks/useApi";
 import { platform } from "../../services/adminService";
 import { formatApiError } from "../../utils/formatError";
 import { Async, Badge, DataTable, Notice, PageFooter, PageHeader, SearchInput, Tile, fmt, when } from "../../components/admin/ui";
+import { providerLabel } from "../../utils/providers";
 
 const STATES = ["", "queued", "submitting", "accepted", "deferred", "delivered", "bounced", "failed", "suppressed", "cancelled", "needs_review"];
 
@@ -41,7 +42,7 @@ export default function PlatformQueue() {
       </div>
       <div className="card"><Async state={msgs}>{(d) => (<><DataTable rows={d.results} empty="No messages in this state." columns={[
         { key: "recipient", header: "Recipient" }, { key: "campaign", header: "Campaign", render: (m) => <div><p>{m.campaign}</p><p className="text-xs text-slate-500">{m.company || "—"}</p></div> },
-        { key: "state", header: "State", render: (m) => <Badge value={m.state} /> }, { key: "provider", header: "Provider" }, { key: "attempts", header: "Tries" },
+        { key: "state", header: "State", render: (m) => <Badge value={m.state} /> }, { key: "provider", header: "Provider", render: (m) => providerLabel(m.provider) }, { key: "attempts", header: "Tries" },
         { key: "last_error", header: "Last error", render: (m) => <span className="text-xs break-words">{m.last_error || "—"}</span> }, { key: "updated_at", header: "Updated", render: (m) => when(m.updated_at) },
         { key: "a", header: "", render: (m) => m.state === "failed" ? <button className="btn-secondary px-2 py-1" onClick={() => setConfirm({ title: "Retry message", message: `Retry ${m.recipient}? Only failed messages with a temporary error can be retried.`, danger: false, fn: () => platform.messageAction(m.id, "retry"), ok: "Message queued for retry." })}>Retry</button>
           : m.state === "needs_review" ? (<div className="flex gap-2">

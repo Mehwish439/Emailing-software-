@@ -1,6 +1,7 @@
 import useApi from "../../hooks/useApi";
 import { platform } from "../../services/adminService";
 import { Async, Badge, DataTable, Notice, PageHeader, when } from "../../components/admin/ui";
+import { providerLabel } from "../../utils/providers";
 
 export default function PlatformHealth() {
   const state = useApi(platform.health);
@@ -12,7 +13,7 @@ export default function PlatformHealth() {
         <div className="grid gap-4 md:grid-cols-3">
           <div className="card p-5"><h2 className="font-semibold">Database</h2><p className="mt-2">{h.database.ok ? <Badge value="ok" label="Connected" /> : <Badge value="failed" label="Unavailable" />}</p>{h.database.detail && <p className="text-xs text-red-700 mt-1">{h.database.detail}</p>}</div>
           <div className="card p-5"><h2 className="font-semibold">Celery / Redis (optional)</h2><p className="mt-2">{!h.broker.configured ? <Badge value="pending" label="Not configured" /> : h.broker.ok ? <Badge value="ok" label="Reachable" /> : <Badge value="failed" label="Unreachable" />}</p><p className="text-xs text-slate-500 mt-1">{h.broker.detail}</p></div>
-          <div className="card p-5"><h2 className="font-semibold">Providers</h2>{Object.entries(h.providers).map(([n, p]) => <p key={n} className="mt-2 text-sm capitalize">{n}: {p.ok === null ? "not probed" : p.ok ? "OK" : "failing"}{p.active ? " (active)" : ""}</p>)}</div>
+          <div className="card p-5"><h2 className="font-semibold">Providers</h2>{Object.entries(h.providers).map(([n, p]) => <p key={n} className="mt-2 text-sm">{providerLabel(n)}: {p.ok === null ? "not probed" : p.ok ? "OK" : "failing"}{p.active ? " (active)" : ""}{p.ok === false && p.detail ? <span className="block text-xs text-red-600 break-words">{p.detail}</span> : null}</p>)}</div>
         </div>
         <div className="card"><h2 className="px-4 pt-4 font-semibold">Background jobs</h2><DataTable rows={h.jobs} rowKey="name" empty="No job has reported yet. If you rely on cron, confirm it is calling the scheduler." columns={[
           { key: "name", header: "Job" }, { key: "last_run_at", header: "Last run", render: (j) => when(j.last_run_at) }, { key: "status", header: "Result", render: (j) => <Badge value={j.status === "ok" ? "ok" : "failed"} label={j.status} /> },

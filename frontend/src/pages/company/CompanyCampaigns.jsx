@@ -6,6 +6,7 @@ import useApi from "../../hooks/useApi";
 import { company } from "../../services/adminService";
 import { formatApiError } from "../../utils/formatError";
 import { Async, Badge, DataTable, PageFooter, PageHeader, fmt, pct } from "../../components/admin/ui";
+import { providerLabel } from "../../utils/providers";
 
 const STATUSES = ["", "draft", "scheduled", "processing", "paused", "sent", "failed", "cancelled"];
 
@@ -32,7 +33,7 @@ export default function CompanyCampaigns() {
         <DataTable rows={d.results} empty="No campaigns match this filter." columns={[
           { key: "name", header: "Campaign", render: (c) => <div><p className="font-medium text-slate-900">{c.name}</p><p className="text-xs text-slate-500">{c.owner}</p></div> },
           { key: "status", header: "Status", render: (c) => <Badge value={c.status} /> },
-          { key: "provider", header: "Provider", render: (c) => c.provider || "—" },
+          { key: "provider", header: "Provider", render: (c) => (c.provider ? providerLabel(c.provider) : "—") },
           { key: "recipients", header: "Recipients", render: (c) => fmt(c.recipients) },
           { key: "progress", header: "Progress", render: (c) => pct(c.progress) },
           { key: "accepted", header: "Accepted", render: (c) => fmt(c.accepted) },

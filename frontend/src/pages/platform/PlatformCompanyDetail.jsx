@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PROVIDER_NAMES, providerLabel } from "../../utils/providers";
 import { Link, useParams } from "react-router-dom";
 
 import ConfirmDialog from "../../components/ConfirmDialog";
@@ -8,6 +9,7 @@ import useApi from "../../hooks/useApi";
 import { platform } from "../../services/adminService";
 import { fieldErrors, formatApiError } from "../../utils/formatError";
 import { Async, Badge, DataTable, Field, Notice, PageHeader, Tile, UsageBar, fmt, pct, when } from "../../components/admin/ui";
+import ProviderUsage from "../../components/ProviderUsage";
 
 const num = (v) => (v === "" || v === null || v === undefined ? null : Number(v));
 
@@ -56,6 +58,7 @@ export default function PlatformCompanyDetail() {
           <Tile label="Accepted (30d)" value={fmt(c.metrics_30d.accepted)} /><Tile label="Bounce rate (30d)" value={pct(c.metrics_30d.bounce_rate)} />
         </div>
         <div className="card p-5 space-y-4 max-w-2xl"><UsageBar label="Today" used={c.daily_used} limit={c.daily_limit} /><UsageBar label="This month" used={c.monthly_used} limit={c.monthly_limit} /></div>
+        <ProviderUsage data={c.by_provider} available={c.effective_providers} title="Email providers for this company" />
         <div className="card"><h2 className="px-4 pt-4 font-semibold">Members</h2>
           <DataTable rows={c.members} empty="No members yet — invite the company administrator." columns={[
             { key: "email", header: "User", render: (m) => <div><p className="font-medium">{`${m.first_name} ${m.last_name}`.trim() || m.email}</p><p className="text-xs text-slate-500">{m.email}</p></div> },
@@ -74,7 +77,7 @@ export default function PlatformCompanyDetail() {
               <Field label="Monthly override" htmlFor="ce-m" error={errors.monthly_quota_override}><input id="ce-m" type="number" min="0" className="input" value={edit.monthly_quota_override} onChange={(e) => setEdit({ ...edit, monthly_quota_override: e.target.value })} /></Field>
             </div>
             <fieldset><legend className="label">Providers this company may choose</legend>
-              {["brevo", "smtp"].map((p) => <label key={p} className="mr-4 text-sm"><input type="checkbox" checked={edit.allowed_providers.includes(p)} onChange={(e) => setEdit({ ...edit, allowed_providers: e.target.checked ? [...edit.allowed_providers, p] : edit.allowed_providers.filter((x) => x !== p) })} /> {p}</label>)}</fieldset>
+              {PROVIDER_NAMES.map((p) => <label key={p} className="mr-4 text-sm"><input type="checkbox" checked={edit.allowed_providers.includes(p)} onChange={(e) => setEdit({ ...edit, allowed_providers: e.target.checked ? [...edit.allowed_providers, p] : edit.allowed_providers.filter((x) => x !== p) })} /> {providerLabel(p)}</label>)}</fieldset>
           </form>)}
         </Modal>
         <Modal open={!!invite} onClose={() => setInvite(null)} title="Invite to this company" footer={<><button className="btn-secondary" onClick={() => setInvite(null)}>Cancel</button><button className="btn-primary" form="iv-form" disabled={saving}>Create invitation</button></>}>

@@ -560,6 +560,43 @@ class CampaignFlowTests(SPBase):
         self.owner.save()
         self.assertIn("company has not approved", sp()["reason"])
 
+    def test_provider_usage_is_reported_for_platform_company_and_user(self):
+        from tenancy.models import Company
+        co = Company.objects.create(name="UsageCo")
+        self.owner.company = co
+        self.owner.save()
+        self.allow_choice()
+        sp = self.sp_campaign(n=2)
+        send_campaign_now(sp)
+        admin = self.make_user("root2", role="super_admin")
+        cl = APIClient(); cl.force_authenticate(admin)
+        self.assertEqual(cl.get("/api/platform/overview/").json()["by_provider"]["sendpulse"]["daily_used"], 2)
+        detail = cl.get(f"/api/platform/companies/{co.id}/").json()
+        self.assertEqual(detail["by_provider"]["sendpulse"]["daily_used"], 2)
+        self.assertEqual(detail["by_provider"]["brevo"]["daily_used"], 0)
+        self.assertIn("sendpulse", detail["effective_providers"])
+        owner_c = APIClient(); owner_c.force_authenticate(self.owner)
+        snap = owner_c.get("/api/auth/me/").json()["quota"]
+        self.assertEqual(snap["by_provider"]["sendpulse"]["daily_used"], 2)
+        co_admin = self.make_user("coadm2", role="company_admin")
+        co_admin.company = co
+        co_admin.save()
+        ca = APIClient(); ca.force_authenticate(co_admin)
+        q = ca.get("/api/company/quotas/").json()
+        self.assertEqual(q["by_provider"]["sendpulse"]["daily_used"], 2)
+        self.assertIn("sendpulse", q["effective_providers"])
+        # another company's usage never leaks in
+        other = Company.objects.create(name="Other")
+        self.assertEqual(cl.get(f"/api/platform/companies/{other.id}/").json()["by_provider"]["sendpulse"]["daily_used"], 0)
+
+    def test_platform_can_create_a_company_with_sendpulse_assigned(self):
+        admin = self.make_user("root3", role="super_admin")
+        cl = APIClient(); cl.force_authenticate(admin)
+        r = cl.post("/api/platform/companies/", {"name": "NewCo", "allowed_providers": ["brevo", "sendpulse"],
+                                                  "preferred_provider": "sendpulse"}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["allowed_providers"], ["brevo", "sendpulse"])
+
     def test_requested_provider_validated_for_user(self):
         c = APIClient(); c.force_authenticate(self.owner)
         r = c.get("/api/campaigns/providers/")

@@ -54,3 +54,12 @@ export const platform = {
 
 // ---- Public invitation flow ----
 export const acceptInvite = (token, password, extra = {}) => post("/auth/accept-invite/", { token, password, ...extra });
+
+// ---- SendPulse provider configuration (/api/providers/sendpulse/*, platform admins only) ----
+// Secrets are write-only: the API reports whether each is set but never returns its value.
+export const sendpulse = {
+  settings: () => get("/providers/sendpulse/settings/"),
+  saveSettings: async (body) => (await api.put("/providers/sendpulse/settings/", body)).data,
+  test: () => post("/providers/sendpulse/test/"),
+  sync: (limit) => post("/providers/sendpulse/sync/", { limit }),
+};

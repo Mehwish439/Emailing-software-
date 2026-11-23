@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import useApi from "../../hooks/useApi";
 import { platform } from "../../services/adminService";
 import { Async, Notice, PageHeader, Tile, UsageBar, fmt, pct } from "../../components/admin/ui";
+import ProviderUsage from "../../components/ProviderUsage";
 
 export default function PlatformOverview() {
   const state = useApi(platform.overview);
@@ -29,6 +30,7 @@ export default function PlatformOverview() {
           <p className="text-sm text-slate-600">Rate: {d.capacity.configured_rate_per_minute ? `${fmt(d.capacity.processed_this_minute)} of ${fmt(d.capacity.configured_rate_per_minute)} this minute` : "no software rate limit set"}{d.capacity.eta_minutes ? ` · backlog ETA ≈ ${fmt(d.capacity.eta_minutes)} min` : ""}</p>
           <p className="text-xs text-slate-500">{d.capacity.warning}</p>
         </div>
+        <ProviderUsage data={d.by_provider} showLimits />
       </>)}</Async>
     </div>
   );

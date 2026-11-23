@@ -1,6 +1,7 @@
 import { company } from "../../services/adminService";
 import useApi from "../../hooks/useApi";
 import { Async, DataTable, Notice, PageHeader, Tile, UsageBar, fmt, limitText } from "../../components/admin/ui";
+import ProviderUsage from "../../components/ProviderUsage";
 
 export default function CompanyQuotas() {
   const state = useApi(company.quotas);
@@ -21,6 +22,7 @@ export default function CompanyQuotas() {
               <UsageBar label="Company — this month" used={d.monthly_used} limit={d.monthly_limit} />
               <ul className="text-xs text-slate-500 list-disc pl-5 space-y-1">{d.rules.map((r) => <li key={r}>{r}</li>)}</ul>
             </div>
+            <ProviderUsage data={d.by_provider} available={d.effective_providers} title="Your email providers" />
             <div className="card">
               <DataTable rows={d.users} empty="No active members."
                 columns={[
