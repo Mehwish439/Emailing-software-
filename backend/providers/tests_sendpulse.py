@@ -531,6 +531,35 @@ class CampaignFlowTests(SPBase):
         r = c.patch("/api/company/settings/", {"preferred_provider": "sendpulse"}, format="json")
         self.assertEqual((r.status_code, r.json()["preferred_provider"]), (200, "sendpulse"))
 
+    def test_migration_approves_sendpulse_only_for_fully_approved_companies(self):
+        import importlib
+        from django.apps import apps
+        from tenancy.models import Company
+        mig = importlib.import_module("tenancy.migrations.0002_approve_sendpulse_for_fully_approved_companies")
+        both = Company.objects.create(name="Both", allowed_providers=["brevo", "smtp"])
+        brevo_only = Company.objects.create(name="BrevoOnly", allowed_providers=["brevo"])
+        empty = Company.objects.create(name="Empty", allowed_providers=[])
+        done = Company.objects.create(name="Done", allowed_providers=["brevo", "smtp", "sendpulse"])
+        mig.approve_sendpulse(apps, None)
+        mig.approve_sendpulse(apps, None)                                   # idempotent
+        for c in (both, brevo_only, empty, done):
+            c.refresh_from_db()
+        self.assertEqual(both.allowed_providers, ["brevo", "smtp", "sendpulse"])
+        self.assertEqual(brevo_only.allowed_providers, ["brevo"])           # deliberate restriction kept
+        self.assertEqual(empty.allowed_providers, [])
+        self.assertEqual(done.allowed_providers, ["brevo", "smtp", "sendpulse"])
+
+    def test_picker_explains_why_a_provider_is_unavailable(self):
+        c = APIClient(); c.force_authenticate(self.owner)
+        sp = lambda: next(o for o in c.get("/api/campaigns/providers/").json()["options"] if o["name"] == "sendpulse")
+        self.assertIn("switched off", sp()["reason"])
+        self.allow_choice()
+        from tenancy.models import Company
+        co = Company.objects.create(name="Restricted", allowed_providers=["brevo"])
+        self.owner.company = co
+        self.owner.save()
+        self.assertIn("company has not approved", sp()["reason"])
+
     def test_requested_provider_validated_for_user(self):
         c = APIClient(); c.force_authenticate(self.owner)
         r = c.get("/api/campaigns/providers/")

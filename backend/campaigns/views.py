@@ -29,6 +29,9 @@ class _ProviderChoiceMixin:
             except ProviderConfigError:
                 return False
 
+        from tenancy.models import PlatformSettings
+
+        choice_switch_on = bool(PlatformSettings.load().allow_company_provider_choice)
         labels = PROVIDER_LABELS
         options = []
         for name in PROVIDERS:                       # always list every provider so the choice is visible
@@ -36,7 +39,9 @@ class _ProviderChoiceMixin:
             is_ready = ready(name)
             reason = ""
             if not allowed:
-                reason = "Not enabled for your account - ask your administrator."
+                reason = ("Provider choice is switched off by the platform administrator - ask your administrator."
+                          if not choice_switch_on else
+                          "Your company has not approved this provider - ask your administrator to enable it.")
             elif not is_ready:
                 reason = "Not configured on the server yet."
             options.append({"name": name, "label": labels.get(name, name), "allowed": allowed,
