@@ -5,6 +5,7 @@ import useApi from "../../hooks/useApi";
 import { company } from "../../services/adminService";
 import { fieldErrors, formatApiError } from "../../utils/formatError";
 import { Async, Badge, Field, Notice, PageHeader, UsageBar, limitText } from "../../components/admin/ui";
+import { providerLabel } from "../../utils/providers";
 
 export default function CompanySettings() {
   const { showToast } = useToast();
@@ -33,7 +34,7 @@ export default function CompanySettings() {
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.allow_overallocation} onChange={(e) => setForm({ ...form, allow_overallocation: e.target.checked })} /> Allow user quotas to total more than the company allowance</label>
           <Field label="Email provider" htmlFor="pp" hint="Providers are approved by the platform administrator. Credentials are never shown here.">
             <select id="pp" className="input" value={form.preferred_provider} onChange={(e) => setForm({ ...form, preferred_provider: e.target.value })}>
-              <option value="">Platform default</option>{(s.allowed_providers || []).map((p) => <option key={p} value={p}>{p}</option>)}</select></Field>
+              <option value="">Platform default</option>{(s.effective_providers || []).map((p) => <option key={p} value={p}>{providerLabel(p)}</option>)}</select></Field>
           <button className="btn-primary" disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
         </form>)}</Async>
       <Async state={sub}>{(d) => (

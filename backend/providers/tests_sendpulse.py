@@ -500,6 +500,37 @@ class CampaignFlowTests(SPBase):
         self.assertIn("sendpulse", opts)
         self.assertIn("brevo", opts)
 
+    def test_company_users_get_sendpulse_unless_the_company_is_explicitly_restricted(self):
+        from tenancy.models import Company
+        co = Company.objects.create(name="Acme")
+        self.owner.company = co
+        self.owner.save()
+        self.assertEqual(available_providers(self.owner)["options"], ["brevo"])          # choice off: unchanged
+        self.allow_choice()
+        self.assertIn("sendpulse", available_providers(self.owner)["options"])          # no list -> all offered
+        co.allowed_providers = ["brevo"]
+        co.save()
+        self.assertEqual(available_providers(self.owner)["options"], ["brevo"])         # explicit list restricts
+        co.allowed_providers = ["brevo", "sendpulse"]
+        co.preferred_provider = "sendpulse"
+        co.save()
+        info = available_providers(self.owner)
+        self.assertEqual((info["options"], info["default"]), (["brevo", "sendpulse"], "sendpulse"))
+
+    def test_company_settings_api_exposes_and_enforces_effective_providers(self):
+        from tenancy.models import Company
+        co = Company.objects.create(name="Acme2")
+        admin = self.make_user("coadmin", role="company_admin")
+        admin.company = co
+        admin.save()
+        c = APIClient(); c.force_authenticate(admin)
+        self.assertEqual(c.get("/api/company/settings/").json()["effective_providers"], [])
+        self.assertEqual(c.patch("/api/company/settings/", {"preferred_provider": "sendpulse"}, format="json").status_code, 403)
+        self.allow_choice()
+        self.assertIn("sendpulse", c.get("/api/company/settings/").json()["effective_providers"])
+        r = c.patch("/api/company/settings/", {"preferred_provider": "sendpulse"}, format="json")
+        self.assertEqual((r.status_code, r.json()["preferred_provider"]), (200, "sendpulse"))
+
     def test_requested_provider_validated_for_user(self):
         c = APIClient(); c.force_authenticate(self.owner)
         r = c.get("/api/campaigns/providers/")

@@ -330,8 +330,14 @@ class CompanyAudit(CompanyBase):
 
 
 class CompanySettings(CompanyBase):
+    def _data(self, company):
+        from providers.registry import company_provider_options
+
+        # effective_providers = what this company may actually choose (explicit list, else all when choice is on)
+        return {**CompanySerializer(company).data, "effective_providers": company_provider_options(company)}
+
     def get(self, request):
-        return Response(CompanySerializer(self.company).data)
+        return Response(self._data(self.company))
 
     def patch(self, request):
         c = self.company
@@ -341,10 +347,10 @@ class CompanySettings(CompanyBase):
         if "allow_overallocation" in request.data:
             c.allow_overallocation = bool(request.data["allow_overallocation"])
         if "preferred_provider" in request.data:
-            from .models import PlatformSettings
+            from providers.registry import company_provider_options
 
             choice = request.data["preferred_provider"]
-            if choice and (not PlatformSettings.load().allow_company_provider_choice or choice not in (c.allowed_providers or [])):
+            if choice and choice not in company_provider_options(c):
                 return Response({"detail": "That provider is not approved for your company."}, status=403)
             c.preferred_provider = choice
         if not c.name:
@@ -355,7 +361,7 @@ class CompanySettings(CompanyBase):
         except IntegrityError:
             return Response({"detail": "That company name is already taken."}, status=400)
         audit(request.user, "company.updated", target=c, detail={k: request.data[k] for k in request.data})
-        return Response(CompanySerializer(c).data)
+        return Response(self._data(c))
 
 
 class Subscription(CompanyBase):

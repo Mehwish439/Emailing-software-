@@ -29,19 +29,28 @@ def available_providers(user):
     active = (platform.active_provider if platform and platform.active_provider else settings.EMAIL_PROVIDER)
     company = getattr(user, "company", None)
     options, default = [active], active
-    if platform and platform.allow_company_provider_choice and company:
-        approved = [p for p in (company.allowed_providers or []) if p in PROVIDERS]
-        if approved:
-            options = approved
-            if company.preferred_provider in approved:
-                default = company.preferred_provider
-    elif platform and platform.allow_company_provider_choice and not company:
-        # A standalone account (no company) has no approved-provider list to consult. When the platform
-        # administrator has switched provider choice ON, every registered provider is offered (the picker
-        # still greys out any that are not configured). With the switch OFF -- the default -- nothing here
-        # changes: the single active provider is used, exactly as before.
-        options = list(PROVIDERS)
+    if platform and platform.allow_company_provider_choice:
+        # A company (or standalone account) gets its explicit approved list, else every registered provider.
+        # The picker greys out any that are not configured; with the switch OFF only the active provider is used.
+        options = company_provider_options(company) if company else list(PROVIDERS)
+        preferred = getattr(company, "preferred_provider", "") if company else ""
+        if preferred in options:
+            default = preferred
     return {"options": options, "default": default, "choice_allowed": len(options) > 1}
+
+
+def company_provider_options(company):
+    """
+    Providers a COMPANY may choose between. Empty when the platform has provider choice switched off.
+    An explicit approved list restricts exactly; with no list, every registered provider is offered.
+    """
+    from tenancy.models import PlatformSettings
+
+    platform = PlatformSettings.objects.filter(pk=1).first()
+    if not (platform and platform.allow_company_provider_choice):
+        return []
+    approved = [p for p in (company.allowed_providers or []) if p in PROVIDERS]
+    return approved or list(PROVIDERS)
 
 
 def resolve_provider_name(campaign):
@@ -66,7 +75,7 @@ def resolve_provider_name(campaign):
     platform = PlatformSettings.objects.filter(pk=1).first()
     company = getattr(campaign.created_by, "company", None)
     if platform and platform.allow_company_provider_choice and company and company.preferred_provider:
-        if company.preferred_provider in (company.allowed_providers or []):
+        if company.preferred_provider in company_provider_options(company):
             return company.preferred_provider
     if platform and platform.active_provider:
         return platform.active_provider
