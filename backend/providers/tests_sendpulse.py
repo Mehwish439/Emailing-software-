@@ -689,9 +689,20 @@ class WebhookTests(SPBase):
         self.assertEqual(r.status_code, 401)
         self.assertEqual(CampaignEvent.objects.count(), 0)
 
+    def test_shared_secret_header_works_like_brevo_and_wrong_one_is_rejected(self):
+        body = json.dumps(self.legacy("delivered")).encode()
+        ok = self.client.post(self.URL, body, content_type="application/json", HTTP_X_WEBHOOK_SECRET=WEBHOOK_SECRET)
+        self.assertEqual((ok.status_code, ok.json()["results"]), (200, ["processed:delivered"]))
+        bad = self.client.post(self.URL, body, content_type="application/json", HTTP_X_WEBHOOK_SECRET="nope")
+        self.assertEqual(bad.status_code, 401)
+        query = self.client.post(self.URL + f"?secret={WEBHOOK_SECRET}", body, content_type="application/json")
+        self.assertEqual(query.status_code, 401)                      # not accepted in the URL (it would be logged)
+
     @override_settings(SENDPULSE_WEBHOOK_SECRET="")
     def test_no_secret_configured_fails_closed(self):
         self.assertEqual(self.post(self.legacy("delivered"), secret="anything").status_code, 503)
+        body = b"{}"
+        self.assertEqual(self.client.post(self.URL, body, content_type="application/json", HTTP_X_WEBHOOK_SECRET="").status_code, 503)
 
     def test_invalid_json_with_valid_signature_is_400(self):
         r = self.client.post(self.URL, b"not json", content_type="application/json", HTTP_X_SIGNATURE=sign(b"not json"))

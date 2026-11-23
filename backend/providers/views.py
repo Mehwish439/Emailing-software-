@@ -36,6 +36,7 @@ def smtp_bounce_webhook(request):
 
 
 # =============================================================================== SendPulse
+import hmac  # noqa: E402
 import json as _json  # noqa: E402
 
 from django.core.validators import validate_email  # noqa: E402
@@ -60,7 +61,8 @@ from .sendpulse_webhooks import ingest_event, sync_recent, verify_signature  # n
 def sendpulse_webhook(request):
     """
     POST /api/providers/sendpulse/webhook/
-    Verified with X-Signature (HMAC-SHA256 of the raw body, secret = the webhook's key from SendPulse).
+    Verified with X-Signature (HMAC-SHA256 of the raw body) OR an X-Webhook-Secret header (as Brevo's webhook does);
+    both use the secret saved on the SendPulse card.
     With no secret configured the endpoint refuses everything (fail closed, unlike Brevo's dev fallback).
     Responses are chosen for SendPulse's retry behaviour: 401 bad signature, 400 unreadable body,
     500 if processing failed (it will retry; ingestion is idempotent), 200 otherwise.
@@ -74,8 +76,14 @@ def sendpulse_webhook(request):
     body = request.body                      # read BEFORE anything parses it: the signature covers exact bytes
     if len(body) > MAX_BODY:
         return HttpResponse("Payload too large.", status=413)
-    if not verify_signature(body, request.headers.get("X-Signature", ""), secret):
-        logger.warning("Rejected SendPulse webhook with bad signature from %s", request.META.get("REMOTE_ADDR"))
+    # Two accepted proofs, both using the SAME configured secret:
+    #  1. SendPulse's own signature: X-Signature = sha256=HMAC-SHA256(raw body, secret)
+    #  2. Like the Brevo webhook: a shared secret sent in a custom header (X-Webhook-Secret), which can be added
+    #     in SendPulse's "Additional headers" field. Constant-time comparison; never accepted in the URL.
+    shared = request.headers.get("X-Webhook-Secret", "")
+    shared_ok = bool(shared) and hmac.compare_digest(shared.encode("utf-8"), secret.encode("utf-8"))
+    if not (shared_ok or verify_signature(body, request.headers.get("X-Signature", ""), secret)):
+        logger.warning("Rejected SendPulse webhook with bad credentials from %s", request.META.get("REMOTE_ADDR"))
         return HttpResponse("Unauthorized.", status=401)
     try:
         payload = _json.loads(body.decode("utf-8"))
